@@ -1,0 +1,55 @@
+#!/bin/bash
+
+echo "======================================"
+echo "   智能体需求匹配系统 - 一键启动"
+echo "======================================"
+echo ""
+
+# 检查 Python 是否安装
+if ! command -v python3 &> /dev/null; then
+    echo "❌ 错误：未找到 Python3，请先安装 Python"
+    exit 1
+fi
+
+# 检查虚拟环境是否存在
+if [ ! -d "venv" ]; then
+    echo "📦 创建 Python 虚拟环境..."
+    python3 -m venv venv
+fi
+
+# 激活虚拟环境
+echo "🔧 激活虚拟环境..."
+source venv/bin/activate
+
+# 安装依赖
+echo "📚 检查并安装依赖..."
+pip install -q -r requirements.txt
+
+# 检查 .env 文件
+if [ ! -f ".env" ]; then
+    echo "⚙️ 创建 .env 文件..."
+    cp .env.example .env
+    echo ""
+    echo "⚠️ 请编辑 .env 文件并填入你的 OPENAI_API_KEY"
+    echo ""
+fi
+
+echo ""
+echo "🚀 启动服务器..."
+echo "📱 访问地址：http://localhost:8000"
+echo ""
+echo "按 Ctrl+C 停止服务器"
+echo "======================================"
+echo ""
+
+# 打开浏览器
+if command -v open &> /dev/null; then
+    sleep 2
+    open http://localhost:8000
+elif command -v xdg-open &> /dev/null; then
+    sleep 2
+    xdg-open http://localhost:8000
+fi
+
+# 启动服务器
+uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000

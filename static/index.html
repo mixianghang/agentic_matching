@@ -1,0 +1,773 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>智能体需求匹配系统</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            height: 100vh;
+            overflow: hidden;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+
+        /* 登录/注册界面 */
+        .auth-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+
+        .auth-card {
+            background: white;
+            padding: 48px;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            width: 100%;
+            max-width: 420px;
+        }
+
+        .auth-card h1 {
+            font-size: 28px;
+            color: #333;
+            margin-bottom: 8px;
+            text-align: center;
+        }
+
+        .auth-card p {
+            color: #666;
+            text-align: center;
+            margin-bottom: 32px;
+        }
+
+        .auth-input-group {
+            margin-bottom: 20px;
+        }
+
+        .auth-input-group label {
+            display: block;
+            margin-bottom: 8px;
+            color: #555;
+            font-weight: 500;
+        }
+
+        .auth-input-group input {
+            width: 100%;
+            padding: 12px 16px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.2s;
+        }
+
+        .auth-input-group input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .auth-btn {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .auth-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        /* 主应用界面 */
+        .app-container {
+            display: none;
+            height: 100vh;
+        }
+
+        .app-layout {
+            display: flex;
+            height: 100%;
+            background: white;
+            margin: 0;
+        }
+
+        /* 左侧边栏 */
+        .sidebar {
+            width: 320px;
+            background: #f7f8fa;
+            border-right: 1px solid #e5e7eb;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .sidebar-header {
+            padding: 24px 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .sidebar-header h2 {
+            font-size: 20px;
+            margin-bottom: 4px;
+        }
+
+        .sidebar-header p {
+            font-size: 13px;
+            opacity: 0.9;
+        }
+
+        .new-task-btn {
+            margin: 16px 20px;
+            padding: 12px;
+            background: white;
+            color: #667eea;
+            border: 2px solid #667eea;
+            border-radius: 10px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .new-task-btn:hover {
+            background: #667eea;
+            color: white;
+        }
+
+        .task-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 0 12px;
+        }
+
+        .task-item {
+            padding: 16px;
+            margin: 8px 0;
+            background: white;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: 2px solid transparent;
+        }
+
+        .task-item:hover {
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+        }
+
+        .task-item.active {
+            border-color: #667eea;
+            background: #f0f4ff;
+        }
+
+        .task-item-title {
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 6px;
+            font-size: 15px;
+        }
+
+        .task-item-preview {
+            font-size: 13px;
+            color: #888;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .task-item-meta {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 10px;
+            font-size: 12px;
+        }
+
+        .task-type-badge {
+            padding: 4px 10px;
+            background: #e0e7ff;
+            color: #4f46e5;
+            border-radius: 20px;
+            font-weight: 500;
+        }
+
+        .task-status {
+            color: #888;
+        }
+
+        /* 右侧主内容区 */
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .chat-header {
+            padding: 20px 28px;
+            border-bottom: 1px solid #e5e7eb;
+            background: #fafbfc;
+        }
+
+        .chat-header h3 {
+            font-size: 18px;
+            color: #333;
+            margin-bottom: 6px;
+        }
+
+        .chat-header p {
+            font-size: 13px;
+            color: #888;
+        }
+
+        .chat-container {
+            flex: 1;
+            display: flex;
+            overflow: hidden;
+        }
+
+        .chat-area {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            border-right: 1px solid #e5e7eb;
+        }
+
+        .messages-area {
+            flex: 1;
+            overflow-y: auto;
+            padding: 24px 28px;
+        }
+
+        .message {
+            max-width: 75%;
+            margin-bottom: 20px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .message.user {
+            align-items: flex-end;
+            margin-left: auto;
+        }
+
+        .message.agent {
+            align-items: flex-start;
+        }
+
+        .message-bubble {
+            padding: 14px 18px;
+            border-radius: 16px;
+            font-size: 15px;
+            line-height: 1.6;
+            word-wrap: break-word;
+        }
+
+        .message.user .message-bubble {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-bottom-right-radius: 4px;
+        }
+
+        .message.agent .message-bubble {
+            background: #f3f4f6;
+            color: #333;
+            border-bottom-left-radius: 4px;
+        }
+
+        .message-time {
+            font-size: 12px;
+            color: #aaa;
+            margin-top: 6px;
+        }
+
+        .message.user .message-time {
+            text-align: right;
+        }
+
+        .input-area {
+            padding: 20px 28px;
+            border-top: 1px solid #e5e7eb;
+            background: #fafbfc;
+        }
+
+        .input-wrapper {
+            display: flex;
+            gap: 12px;
+            align-items: flex-end;
+        }
+
+        .input-wrapper textarea {
+            flex: 1;
+            padding: 14px 18px;
+            border: 2px solid #e5e7eb;
+            border-radius: 12px;
+            font-size: 15px;
+            resize: none;
+            font-family: inherit;
+            max-height: 120px;
+        }
+
+        .input-wrapper textarea:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .send-btn {
+            padding: 14px 28px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 12px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .send-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        /* 右侧信息面板 */
+        .info-panel {
+            width: 320px;
+            background: #f7f8fa;
+            overflow-y: auto;
+        }
+
+        .info-section {
+            padding: 24px 20px;
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        .info-section h4 {
+            font-size: 15px;
+            color: #333;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .info-item {
+            padding: 12px;
+            background: white;
+            border-radius: 10px;
+            margin-bottom: 10px;
+        }
+
+        .info-item-title {
+            font-weight: 600;
+            font-size: 14px;
+            color: #333;
+            margin-bottom: 4px;
+        }
+
+        .info-item-desc {
+            font-size: 13px;
+            color: #888;
+        }
+
+        .match-item {
+            padding: 14px;
+            background: white;
+            border-radius: 10px;
+            margin-bottom: 10px;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: 2px solid transparent;
+        }
+
+        .match-item:hover {
+            border-color: #667eea;
+        }
+
+        .match-name {
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 6px;
+        }
+
+        .match-details {
+            font-size: 13px;
+            color: #666;
+            line-height: 1.5;
+        }
+
+        /* 欢迎界面 */
+        .welcome-screen {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            padding: 40px;
+            text-align: center;
+        }
+
+        .welcome-icon {
+            width: 80px;
+            height: 80px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 40px;
+            margin-bottom: 24px;
+        }
+
+        .welcome-screen h2 {
+            font-size: 24px;
+            color: #333;
+            margin-bottom: 12px;
+        }
+
+        .welcome-screen p {
+            color: #888;
+            font-size: 15px;
+            max-width: 400px;
+        }
+
+        /* 隐藏类 */
+        .hidden {
+            display: none !important;
+        }
+    </style>
+</head>
+<body>
+    <!-- 登录/注册界面 -->
+    <div class="auth-container" id="authContainer">
+        <div class="auth-card">
+            <h1>🤖 智能体需求匹配</h1>
+            <p>让智能体帮你完成需求匹配</p>
+            
+            <div class="auth-input-group">
+                <label>用户名</label>
+                <input type="text" id="authUsername" placeholder="输入用户名">
+            </div>
+            
+            <div class="auth-input-group">
+                <label>邮箱（可选）</label>
+                <input type="email" id="authEmail" placeholder="输入邮箱">
+            </div>
+            
+            <button class="auth-btn" onclick="loginOrRegister()">登录 / 注册</button>
+        </div>
+    </div>
+
+    <!-- 主应用界面 -->
+    <div class="app-container" id="appContainer">
+        <div class="app-layout">
+            <!-- 左侧边栏 -->
+            <div class="sidebar">
+                <div class="sidebar-header">
+                    <h2>我的任务</h2>
+                    <p id="userInfo">欢迎使用</p>
+                </div>
+                
+                <button class="new-task-btn" onclick="createNewTask()">
+                    + 新建需求
+                </button>
+                
+                <div class="task-list" id="taskList">
+                    <!-- 任务列表 -->
+                </div>
+            </div>
+
+            <!-- 右侧主内容 -->
+            <div class="main-content">
+                <div class="chat-header" id="chatHeader">
+                    <h3>选择或创建一个需求</h3>
+                    <p>开始与智能体对话</p>
+                </div>
+
+                <div class="chat-container">
+                    <div class="chat-area" id="chatArea">
+                        <div class="welcome-screen" id="welcomeScreen">
+                            <div class="welcome-icon">💬</div>
+                            <h2>开始你的对话</h2>
+                            <p>选择左侧的任务，或点击"新建需求"来开始与智能体的对话</p>
+                        </div>
+                        
+                        <div class="messages-area hidden" id="messagesArea">
+                            <!-- 聊天消息 -->
+                        </div>
+
+                        <div class="input-area hidden" id="inputArea">
+                            <div class="input-wrapper">
+                                <textarea id="messageInput" placeholder="输入消息..." rows="1"></textarea>
+                                <button class="send-btn" onclick="sendMessage()">发送</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="info-panel" id="infoPanel">
+                        <div class="info-section">
+                            <h4>📋 需求详情</h4>
+                            <div id="taskDetails">
+                                <p style="color: #888; font-size: 14px;">选择一个任务查看详情</p>
+                            </div>
+                        </div>
+
+                        <div class="info-section">
+                            <h4>🎯 匹配结果</h4>
+                            <div id="matchResults">
+                                <p style="color: #888; font-size: 14px;">暂无匹配</p>
+                            </div>
+                        </div>
+
+                        <div class="info-section">
+                            <h4>📝 协商记录</h4>
+                            <div id="negotiationLog">
+                                <p style="color: #888; font-size: 14px;">暂无协商记录</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentUser = null;
+        let currentTask = null;
+        let tasks = [];
+
+        // 登录/注册
+        async function loginOrRegister() {
+            const username = document.getElementById('authUsername').value.trim();
+            const email = document.getElementById('authEmail').value.trim();
+
+            if (!username) {
+                alert('请输入用户名');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/users/', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, email })
+                });
+                currentUser = await response.json();
+                localStorage.setItem('currentUser', JSON.stringify(currentUser));
+                showApp();
+            } catch (e) {
+                alert('登录失败');
+            }
+        }
+
+        function showApp() {
+            document.getElementById('authContainer').classList.add('hidden');
+            document.getElementById('appContainer').style.display = 'flex';
+            document.getElementById('userInfo').textContent = `欢迎，${currentUser.username}`;
+            loadTasks();
+        }
+
+        async function loadTasks() {
+            try {
+                const response = await fetch('/api/tasks/');
+                tasks = await response.json();
+                tasks = tasks.filter(t => t.user_id === currentUser.id);
+                renderTaskList();
+            } catch (e) {
+                console.error('加载任务失败', e);
+            }
+        }
+
+        function renderTaskList() {
+            const list = document.getElementById('taskList');
+            if (tasks.length === 0) {
+                list.innerHTML = '<div style="padding: 20px; text-align: center; color: #888;">暂无任务，点击上方按钮创建</div>';
+                return;
+            }
+
+            list.innerHTML = tasks.map(task => `
+                <div class="task-item ${currentTask && currentTask.id === task.id ? 'active' : ''}" onclick="selectTask('${task.id}')">
+                    <div class="task-item-title">${getTaskTypeName(task.task_type)}</div>
+                    <div class="task-item-preview">${task.description.substring(0, 50)}${task.description.length > 50 ? '...' : ''}</div>
+                    <div class="task-item-meta">
+                        <span class="task-type-badge">${task.task_type}</span>
+                        <span class="task-status">${getTaskStatusName(task.status)}</span>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function getTaskTypeName(type) {
+            const names = { 'dating': '相亲', 'rental': '租房', 'gaming': '游戏' };
+            return names[type] || type;
+        }
+
+        function getTaskStatusName(status) {
+            const names = { 'pending': '待处理', 'active': '进行中', 'matching': '匹配中', 'matched': '已匹配', 'completed': '已完成', 'cancelled': '已取消' };
+            return names[status] || status;
+        }
+
+        async function createNewTask() {
+            const response = await fetch('/api/tasks/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    user_id: currentUser.id,
+                    task_type: 'dating',
+                    description: '新建需求对话中...',
+                    requirements: {}
+                })
+            });
+            const task = await response.json();
+            tasks.push(task);
+            renderTaskList();
+            selectTask(task.id);
+
+            const welcomeMsg = {
+                id: Date.now().toString(),
+                sender_id: 'system',
+                content: '你好！我是你的智能助手。请告诉我你的需求，比如：\n\n• "我想找一个合租室友"\n• "我想认识志同道合的朋友"\n• "我想找人一起打游戏"\n\n请用自然语言描述你的需求吧！',
+                timestamp: new Date().toISOString()
+            };
+            addMessageToUI(welcomeMsg, 'agent');
+        }
+
+        function selectTask(taskId) {
+            currentTask = tasks.find(t => t.id === taskId);
+            renderTaskList();
+            renderChatHeader();
+            renderMessages();
+            renderInfoPanel();
+
+            document.getElementById('welcomeScreen').classList.add('hidden');
+            document.getElementById('messagesArea').classList.remove('hidden');
+            document.getElementById('inputArea').classList.remove('hidden');
+        }
+
+        function renderChatHeader() {
+            document.getElementById('chatHeader').innerHTML = `
+                <h3>${getTaskTypeName(currentTask.task_type)}</h3>
+                <p>创建于 ${new Date(currentTask.created_at).toLocaleString('zh-CN')}</p>
+            `;
+        }
+
+        function renderMessages() {
+            const area = document.getElementById('messagesArea');
+            area.innerHTML = '';
+            
+            if (currentTask.messages && currentTask.messages.length > 0) {
+                currentTask.messages.forEach(msg => {
+                    const isUser = msg.sender_id !== currentTask.agent_id;
+                    addMessageToUI(msg, isUser ? 'user' : 'agent');
+                });
+            }
+        }
+
+        function addMessageToUI(msg, type) {
+            const area = document.getElementById('messagesArea');
+            const div = document.createElement('div');
+            div.className = `message ${type}`;
+            div.innerHTML = `
+                <div class="message-bubble">${msg.content}</div>
+                <div class="message-time">${new Date(msg.timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</div>
+            `;
+            area.appendChild(div);
+            area.scrollTop = area.scrollHeight;
+        }
+
+        function renderInfoPanel() {
+            document.getElementById('taskDetails').innerHTML = `
+                <div class="info-item">
+                    <div class="info-item-title">需求类型</div>
+                    <div class="info-item-desc">${getTaskTypeName(currentTask.task_type)}</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-item-title">状态</div>
+                    <div class="info-item-desc">${getTaskStatusName(currentTask.status)}</div>
+                </div>
+                <div class="info-item">
+                    <div class="info-item-title">描述</div>
+                    <div class="info-item-desc">${currentTask.description}</div>
+                </div>
+            `;
+
+            const matches = [
+                { name: '张三', details: '年龄28岁，喜欢运动和旅行' },
+                { name: '李四', details: '年龄26岁，IT行业从业者' }
+            ];
+
+            document.getElementById('matchResults').innerHTML = matches.length > 0
+                ? matches.map(m => `
+                    <div class="match-item">
+                        <div class="match-name">${m.name}</div>
+                        <div class="match-details">${m.details}</div>
+                    </div>
+                `).join('')
+                : '<p style="color: #888; font-size: 14px;">暂无匹配</p>';
+        }
+
+        async function sendMessage() {
+            const input = document.getElementById('messageInput');
+            const content = input.value.trim();
+            if (!content || !currentTask) return;
+
+            const userMsg = {
+                id: Date.now().toString(),
+                sender_id: currentUser.id,
+                content: content,
+                timestamp: new Date().toISOString()
+            };
+
+            addMessageToUI(userMsg, 'user');
+            input.value = '';
+
+            try {
+                const response = await fetch('/api/messages/', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        task_id: currentTask.id,
+                        user_message: content
+                    })
+                });
+
+                const data = await response.json();
+                addMessageToUI(data.message, 'agent');
+
+                if (currentTask.description === '新建需求对话中...') {
+                    currentTask.description = content.substring(0, 100);
+                    renderTaskList();
+                    renderInfoPanel();
+                }
+            } catch (e) {
+                console.error('发送失败', e);
+            }
+        }
+
+        document.getElementById('messageInput').addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+
+        window.onload = function() {
+            const saved = localStorage.getItem('currentUser');
+            if (saved) {
+                currentUser = JSON.parse(saved);
+                showApp();
+            }
+        };
+    </script>
+</body>
+</html>
