@@ -17,9 +17,22 @@ class User(BaseModel):
     id: str
     username: str
     email: Optional[str] = None
+    password_hash: Optional[str] = None
+    auth_provider: Optional[str] = None
+    third_party_id: Optional[str] = None
+    is_active: bool = True
     created_at: datetime = Field(default_factory=datetime.now)
     preferences: Dict[str, Any] = Field(default_factory=dict)
     private_info: Dict[str, Any] = Field(default_factory=dict)
+
+
+class Token(BaseModel):
+    id: str
+    user_id: str
+    token: str
+    created_at: datetime = Field(default_factory=datetime.now)
+    expires_at: datetime
+    revoked: bool = False
 
 
 class Agent(BaseModel):

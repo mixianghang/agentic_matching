@@ -10,6 +10,15 @@ class Settings(BaseSettings):
     TEMPERATURE: float = 0.7
     MAX_TOKENS: int = 1000
 
+    STORAGE_TYPE: str = "in_memory"
+    DATABASE_URL: str = "./agentic_matching.db"
+
+    POSTGRES_HOST: str = "localhost"
+    POSTGRES_PORT: int = 5432
+    POSTGRES_USER: str = "postgres"
+    POSTGRES_PASSWORD: str = ""
+    POSTGRES_DB: str = "agentic_matching"
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
