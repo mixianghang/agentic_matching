@@ -12,8 +12,14 @@ from backend.storage_interface import StorageBackend
 def with_lock(func):
     @wraps(func)
     def wrapper(self, *args, **kwargs):
-        with self._lock:
+        acquired = self._lock.acquire(timeout=5)
+        if not acquired:
+            print(f"WARNING: Lock timeout for {func.__name__}")
+            raise Exception(f"Lock timeout for {func.__name__}")
+        try:
             return func(self, *args, **kwargs)
+        finally:
+            self._lock.release()
     return wrapper
 
 
@@ -179,7 +185,6 @@ class SQLiteStorage(StorageBackend):
             private_info={}
         )
     
-    @with_lock
     def get_user(self, user_id: str) -> Optional[User]:
         conn = self._get_connection()
         cursor = conn.cursor()
@@ -190,7 +195,6 @@ class SQLiteStorage(StorageBackend):
             return self._row_to_user(row)
         return None
     
-    @with_lock
     def get_user_by_username(self, username: str) -> Optional[User]:
         conn = self._get_connection()
         cursor = conn.cursor()
@@ -213,7 +217,6 @@ class SQLiteStorage(StorageBackend):
         conn.commit()
         return user
     
-    @with_lock
     def get_all_users(self) -> List[User]:
         conn = self._get_connection()
         cursor = conn.cursor()
@@ -242,7 +245,6 @@ class SQLiteStorage(StorageBackend):
             active=True
         )
     
-    @with_lock
     def get_agent(self, agent_id: str) -> Optional[Agent]:
         conn = self._get_connection()
         cursor = conn.cursor()
@@ -253,7 +255,6 @@ class SQLiteStorage(StorageBackend):
             return self._row_to_agent(row)
         return None
     
-    @with_lock
     def get_agents_by_user(self, user_id: str) -> List[Agent]:
         conn = self._get_connection()
         cursor = conn.cursor()
@@ -289,10 +290,10 @@ class SQLiteStorage(StorageBackend):
         conn = self._get_connection()
         cursor = conn.cursor()
         cursor.execute(
-            """INSERT INTO tasks (id, user_id, agent_id, task_type, description, requirements, status, created_at, matched_task_ids) 
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            """INSERT INTO tasks (id, user_id, agent_id, task_type, description, requirements, status, matched_task_ids, created_at, updated_at) 
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (task_id, user_id, agent_id, task_type, description, 
-             json.dumps(requirements or {}), 'pending', created_at, '[]')
+             json.dumps(requirements or {}), 'pending', '[]', created_at, created_at)
         )
         conn.commit()
         
@@ -308,9 +309,7 @@ class SQLiteStorage(StorageBackend):
             matched_task_ids=[],
             messages=[]
         )
-        return task
     
-    @with_lock
     def get_task(self, task_id: str) -> Optional[Task]:
         conn = self._get_connection()
         cursor = conn.cursor()
@@ -321,7 +320,6 @@ class SQLiteStorage(StorageBackend):
             return self._row_to_task(row)
         return None
     
-    @with_lock
     def get_tasks_by_user(self, user_id: str) -> List[Task]:
         conn = self._get_connection()
         cursor = conn.cursor()
@@ -329,7 +327,6 @@ class SQLiteStorage(StorageBackend):
         rows = cursor.fetchall()
         return [self._row_to_task(row, include_messages=False) for row in rows]
     
-    @with_lock
     def get_all_tasks(self) -> List[Task]:
         conn = self._get_connection()
         cursor = conn.cursor()
@@ -371,7 +368,6 @@ class SQLiteStorage(StorageBackend):
         )
         conn.commit()
     
-    @with_lock
     def get_messages_by_task(self, task_id: str) -> List[Message]:
         conn = self._get_connection()
         cursor = conn.cursor()
@@ -412,7 +408,6 @@ class SQLiteStorage(StorageBackend):
             revoked=False
         )
     
-    @with_lock
     def get_token(self, token: str) -> Optional[Token]:
         conn = self._get_connection()
         cursor = conn.cursor()

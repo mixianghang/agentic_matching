@@ -52,6 +52,7 @@ def reset_database():
             description TEXT NOT NULL,
             status TEXT NOT NULL,
             requirements TEXT,
+            matched_task_ids TEXT,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             FOREIGN KEY (user_id) REFERENCES users(id),
