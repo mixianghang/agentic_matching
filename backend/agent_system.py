@@ -14,7 +14,8 @@ from backend.config import (
 
 load_dotenv()
 
-
+# TODO not only a single user message, instead, jointly consider all user messages in the task history to determine the task type, learn fields needed to complete the task
+# Given user messages, retrieve and store task requirements
 class AgentSystem:
     def __init__(self):
         self.storage = storage
