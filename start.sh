@@ -35,6 +35,17 @@ if [ ! -f ".env" ]; then
 fi
 
 echo ""
+echo "🔍 检查端口 8000 是否被占用..."
+
+# 查找并终止占用端口的进程
+if lsof -Pi :8000 -sTCP:LISTEN -t >/dev/null 2>&1; then
+    echo "⚠️ 端口 8000 已被占用，尝试终止旧进程..."
+    lsof -Pi :8000 -sTCP:LISTEN -t | xargs kill -9 2>/dev/null
+    sleep 1
+    echo "✅ 已终止旧进程"
+fi
+
+echo ""
 echo "🚀 启动服务器..."
 echo "📱 访问地址：http://localhost:8000"
 echo ""
@@ -52,4 +63,5 @@ elif command -v xdg-open &> /dev/null; then
 fi
 
 # 启动服务器
-uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
+unset SSLKEYLOGFILE
+uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
