@@ -112,6 +112,8 @@ class SQLiteStorage(StorageBackend):
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_messages_task_id ON messages(task_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_agents_user_id ON agents(user_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)")
+        cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_third_party_unique ON users(auth_provider, third_party_id) WHERE auth_provider IS NOT NULL AND third_party_id IS NOT NULL")
         
         conn.commit()
     
@@ -199,6 +201,19 @@ class SQLiteStorage(StorageBackend):
         conn = self._get_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM users WHERE username = ?", (username,))
+        row = cursor.fetchone()
+        
+        if row:
+            return self._row_to_user(row)
+        return None
+    
+    def get_user_by_third_party_id(self, auth_provider: str, third_party_id: str) -> Optional[User]:
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM users WHERE auth_provider = ? AND third_party_id = ?",
+            (auth_provider, third_party_id)
+        )
         row = cursor.fetchone()
         
         if row:

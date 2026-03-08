@@ -30,6 +30,11 @@ class StorageBackend(ABC):
         pass
     
     @abstractmethod
+    def get_user_by_third_party_id(self, auth_provider: str, third_party_id: str) -> Optional[User]:
+        """通过第三方ID获取用户"""
+        pass
+    
+    @abstractmethod
     def update_user(self, user: User) -> User:
         """更新用户"""
         pass

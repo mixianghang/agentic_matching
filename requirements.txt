@@ -7,3 +7,6 @@ openai
 python-dotenv
 bcrypt
 passlib[bcrypt]
+pytest
+pytest-asyncio
+httpx

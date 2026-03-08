@@ -591,10 +591,19 @@
 
                     <div class="info-panel" id="infoPanel">
                         <div class="info-section">
-                            <h4>📋 需求详情</h4>
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                                <h4>📋 需求详情</h4>
+                                <div id="taskActions" style="display: none; gap: 8px;">
+                                    <button onclick="editTask()" style="padding: 6px 12px; background: #667eea; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 12px;">编辑</button>
+                                    <button onclick="deleteTask()" style="padding: 6px 12px; background: #ef4444; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 12px;">删除</button>
+                                </div>
+                            </div>
                             <div id="taskDetails">
                                 <p style="color: #888; font-size: 14px;">选择一个任务查看详情</p>
                             </div>
+                            <button id="findMatchesBtn" onclick="findMatches()" style="display: none; width: 100%; margin-top: 12px; padding: 10px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 500;">
+                                🔍 查找匹配
+                            </button>
                         </div>
 
                         <div class="info-section">
@@ -742,7 +751,65 @@
         }
 
         async function thirdPartyLogin(provider) {
-            alert(`${provider === 'wechat' ? '微信' : '支付宝'}登录功能待实现，请先使用账号密码注册/登录`);
+            try {
+                // Get authorization URL from backend
+                const response = await fetch(`/api/auth/sso/${provider}/url`);
+                const data = await response.json();
+                
+                if (response.ok && data.auth_url) {
+                    // Store provider info for callback handling
+                    localStorage.setItem('sso_provider', provider);
+                    localStorage.setItem('sso_state', 'pending');
+                    
+                    // Redirect to SSO provider
+                    window.location.href = data.auth_url;
+                } else {
+                    alert('获取登录链接失败: ' + (data.detail || '未知错误'));
+                }
+            } catch (e) {
+                console.error('SSO login error:', e);
+                alert('登录失败，请稍后重试');
+            }
+        }
+        
+        // Handle SSO callback
+        async function handleSSOCallback() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const code = urlParams.get('code');
+            const provider = localStorage.getItem('sso_provider');
+            const ssoState = localStorage.getItem('sso_state');
+            
+            if (code && provider && ssoState === 'pending') {
+                // Clear SSO state
+                localStorage.removeItem('sso_provider');
+                localStorage.removeItem('sso_state');
+                
+                try {
+                    const response = await fetch(`/api/auth/sso/${provider}/callback`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ code: code })
+                    });
+                    
+                    if (response.ok) {
+                        const data = await response.json();
+                        currentUser = data.user;
+                        localStorage.setItem('currentUser', JSON.stringify(currentUser));
+                        localStorage.setItem('accessToken', data.access_token);
+                        
+                        // Clear URL parameters
+                        window.history.replaceState({}, document.title, '/');
+                        
+                        showApp();
+                    } else {
+                        const error = await response.json();
+                        alert('登录失败: ' + (error.detail || '未知错误'));
+                    }
+                } catch (e) {
+                    console.error('SSO callback error:', e);
+                    alert('登录处理失败，请重试');
+                }
+            }
         }
 
         function showApp() {
@@ -875,6 +942,18 @@
         }
 
         function renderInfoPanel() {
+            document.getElementById('taskActions').style.display = 'flex';
+            document.getElementById('findMatchesBtn').style.display = 
+                (currentTask.status === 'active' || currentTask.status === 'pending') ? 'block' : 'none';
+
+            const requirements = currentTask.requirements || {};
+            let requirementsHtml = '';
+            if (Object.keys(requirements).length > 0) {
+                requirementsHtml = Object.entries(requirements)
+                    .map(([key, value]) => `<div class="info-item-desc" style="margin-top: 4px;"><strong>${key}:</strong> ${value}</div>`)
+                    .join('');
+            }
+
             document.getElementById('taskDetails').innerHTML = `
                 <div class="info-item">
                     <div class="info-item-title">需求类型</div>
@@ -888,21 +967,157 @@
                     <div class="info-item-title">描述</div>
                     <div class="info-item-desc">${currentTask.description}</div>
                 </div>
+                ${requirementsHtml ? `<div class="info-item"><div class="info-item-title">具体要求</div>${requirementsHtml}</div>` : ''}
             `;
 
-            const matches = [
-                { name: '张三', details: '年龄28岁，喜欢运动和旅行' },
-                { name: '李四', details: '年龄26岁，IT行业从业者' }
-            ];
+            // 加载匹配结果
+            loadMatchResults();
+        }
 
-            document.getElementById('matchResults').innerHTML = matches.length > 0
-                ? matches.map(m => `
-                    <div class="match-item">
-                        <div class="match-name">${m.name}</div>
-                        <div class="match-details">${m.details}</div>
-                    </div>
-                `).join('')
-                : '<p style="color: #888; font-size: 14px;">暂无匹配</p>';
+        async function loadMatchResults() {
+            if (!currentTask) return;
+            
+            try {
+                const response = await apiCall(`/api/tasks/${currentTask.id}/matches/`);
+                if (response.ok) {
+                    const data = await response.json();
+                    const matches = data.matches || [];
+                    
+                    if (matches.length > 0) {
+                        document.getElementById('matchResults').innerHTML = matches.map(m => `
+                            <div class="match-item" onclick="startNegotiation('${m.matched_task_id}')">
+                                <div class="match-name">匹配度: ${(m.score * 100).toFixed(1)}%</div>
+                                <div class="match-details">${m.reason || '相似需求'}</div>
+                            </div>
+                        `).join('');
+                    } else {
+                        document.getElementById('matchResults').innerHTML = '<p style="color: #888; font-size: 14px;">暂无匹配，点击"查找匹配"按钮搜索</p>';
+                    }
+                }
+            } catch (e) {
+                console.error('加载匹配结果失败', e);
+            }
+        }
+
+        async function findMatches() {
+            if (!currentTask) return;
+            
+            document.getElementById('findMatchesBtn').disabled = true;
+            document.getElementById('findMatchesBtn').textContent = '�� 搜索中...';
+            
+            try {
+                const response = await apiCall(`/api/tasks/${currentTask.id}/matches/`);
+                if (response.ok) {
+                    const data = await response.json();
+                    loadMatchResults();
+                }
+            } catch (e) {
+                console.error('查找匹配失败', e);
+                alert('查找匹配失败，请稍后重试');
+            } finally {
+                document.getElementById('findMatchesBtn').disabled = false;
+                document.getElementById('findMatchesBtn').textContent = '�� 查找匹配';
+            }
+        }
+
+        async function startNegotiation(matchedTaskId) {
+            if (!currentTask || !confirm('确定要开始与该需求的协商吗？')) return;
+            
+            try {
+                const response = await apiCall('/api/negotiate/', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        task1_id: currentTask.id,
+                        task2_id: matchedTaskId
+                    })
+                });
+                
+                if (response.ok) {
+                    alert('协商已开始！');
+                    // 刷新协商记录
+                    loadNegotiationLog();
+                } else {
+                    const error = await response.json();
+                    alert('协商失败: ' + (error.detail || '未知错误'));
+                }
+            } catch (e) {
+                console.error('开始协商失败', e);
+                alert('开始协商失败');
+            }
+        }
+
+        async function loadNegotiationLog() {
+            // TODO: 实现加载协商记录
+            document.getElementById('negotiationLog').innerHTML = '<p style="color: #888; font-size: 14px;">暂无活动协商记录</p>';
+        }
+
+        function editTask() {
+            if (!currentTask) return;
+            
+            const newDescription = prompt('编辑需求描述:', currentTask.description);
+            if (newDescription === null) return; // 用户取消
+            
+            updateTask({ description: newDescription });
+        }
+
+        async function updateTask(updates) {
+            if (!currentTask) return;
+            
+            try {
+                const response = await apiCall(`/api/tasks/${currentTask.id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(updates)
+                });
+                
+                if (response.ok) {
+                    const updatedTask = await response.json();
+                    Object.assign(currentTask, updatedTask);
+                    renderTaskList();
+                    renderInfoPanel();
+                    alert('更新成功！');
+                } else {
+                    const error = await response.json();
+                    alert('更新失败: ' + (error.detail || '未知错误'));
+                }
+            } catch (e) {
+                console.error('更新任务失败', e);
+                alert('更新失败');
+            }
+        }
+
+        async function deleteTask() {
+            if (!currentTask || !confirm('确定要删除这个需求吗？此操作不可恢复。')) return;
+            
+            try {
+                const response = await apiCall(`/api/tasks/${currentTask.id}`, {
+                    method: 'DELETE'
+                });
+                
+                if (response.ok) {
+                    tasks = tasks.filter(t => t.id !== currentTask.id);
+                    currentTask = null;
+                    renderTaskList();
+                    
+                    // 重置界面
+                    document.getElementById('welcomeScreen').classList.remove('hidden');
+                    document.getElementById('messagesArea').classList.add('hidden');
+                    document.getElementById('inputArea').classList.add('hidden');
+                    document.getElementById('taskActions').style.display = 'none';
+                    document.getElementById('findMatchesBtn').style.display = 'none';
+                    document.getElementById('taskDetails').innerHTML = '<p style="color: #888; font-size: 14px;">选择一个任务查看详情</p>';
+                    document.getElementById('matchResults').innerHTML = '<p style="color: #888; font-size: 14px;">暂无匹配</p>';
+                    
+                    alert('删除成功！');
+                } else {
+                    const error = await response.json();
+                    alert('删除失败: ' + (error.detail || '未知错误'));
+                }
+            } catch (e) {
+                console.error('删除任务失败', e);
+                alert('删除失败');
+            }
         }
 
         async function sendMessage() {
@@ -951,6 +1166,10 @@
         });
 
         window.onload = function() {
+            // First check for SSO callback
+            handleSSOCallback();
+            
+            // Then check for saved session
             const saved = localStorage.getItem('currentUser');
             if (saved) {
                 currentUser = JSON.parse(saved);

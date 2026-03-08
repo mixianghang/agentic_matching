@@ -44,3 +44,6 @@ Thumbs.db
 *.log
 ssl-key.log
 *.db
+
+# For security
+.env.memory

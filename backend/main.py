@@ -8,14 +8,33 @@ from backend.models import Task, User, Agent
 from backend.storage import storage
 from backend.agent_system import agent_system
 from backend.auth import get_password_hash, verify_password
+from backend.sso import SSOFactory, SSOConfig
 import uuid
 import logging
+import os
 
 logger = logging.getLogger(__name__)
-import os
 import secrets
 
 app = FastAPI(title="Agentic Matching System")
+
+# SSO Configuration
+SSO_CONFIGS = {
+    "wechat": SSOConfig(
+        app_id=os.getenv("WECHAT_APP_ID", ""),
+        app_secret=os.getenv("WECHAT_APP_SECRET", ""),
+        redirect_uri=os.getenv("WECHAT_REDIRECT_URI", "http://localhost:8000/api/auth/sso/wechat/callback"),
+        scope="snsapi_login",
+        state="wechat_auth"
+    ),
+    "alipay": SSOConfig(
+        app_id=os.getenv("ALIPAY_APP_ID", ""),
+        app_secret=os.getenv("ALIPAY_APP_SECRET", ""),
+        redirect_uri=os.getenv("ALIPAY_REDIRECT_URI", "http://localhost:8000/api/auth/sso/alipay/callback"),
+        scope="auth_user",
+        state="alipay_auth"
+    )
+}
 security = HTTPBearer()
 
 
@@ -74,6 +93,11 @@ class CreateTaskRequest(BaseModel):
     description: str
     requirements: dict = None
 
+class UpdateTaskRequest(BaseModel):
+    description: Optional[str] = None
+    requirements: Optional[dict] = None
+    status: Optional[str] = None
+
 class SendMessageRequest(BaseModel):
     task_id: str
     user_message: str
@@ -123,55 +147,92 @@ def login(request: LoginRequest):
     access_token = create_user_token(user.id)
     return LoginResponse(user=user, access_token=access_token)
 
-@app.post("/api/auth/third-party/login")
-def third_party_login(request: ThirdPartyCallbackRequest):
-    if request.provider == "wechat":
-        return {
-            "provider": "wechat",
-            "message": "WeChat login not yet implemented",
-            "status": "pending"
-        }
-    elif request.provider == "alipay":
-        return {
-            "provider": "alipay", 
-            "message": "Alipay login not yet implemented",
-            "status": "pending"
-        }
-    else:
-        raise HTTPException(status_code=400, detail="Unsupported provider")
+@app.get("/api/auth/sso/{provider}/url")
+def get_sso_auth_url(provider: str):
+    """Get SSO authorization URL for the specified provider."""
+    if provider not in SSO_CONFIGS:
+        raise HTTPException(status_code=400, detail=f"Unsupported provider: {provider}")
+    
+    config = SSO_CONFIGS[provider]
+    if not config.app_id:
+        raise HTTPException(status_code=500, detail=f"{provider} SSO not configured")
+    
+    try:
+        sso_provider = SSOFactory.get_provider(provider, config)
+        auth_url = sso_provider.get_auth_url()
+        return {"auth_url": auth_url, "provider": provider}
+    except Exception as e:
+        logger.error(f"Failed to generate auth URL for {provider}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to generate authorization URL")
 
-@app.post("/api/auth/third-party/register", response_model=LoginResponse)
-def third_party_register(request: ThirdPartyCallbackRequest):
-    if request.provider == "wechat":
-        existing_user = storage.get_user_by_username(request.username or f"wechat_user_{request.code[:8]}")
-        if existing_user:
-            raise HTTPException(status_code=400, detail="User already exists")
-        
-        user = storage.create_user(
-            username=request.username or f"wechat_user_{request.code[:8]}",
-            auth_provider="wechat",
-            third_party_id=request.code
-        )
-        
-        access_token = create_user_token(user.id)
-        return LoginResponse(user=user, access_token=access_token)
+
+@app.post("/api/auth/sso/{provider}/callback", response_model=LoginResponse)
+async def sso_callback(provider: str, request: ThirdPartyCallbackRequest):
+    """
+    Handle SSO callback. This endpoint:
+    1. Exchanges code for access token
+    2. Fetches user info from provider
+    3. Checks if user exists in database
+       - If exists: logs in the user
+       - If not: creates new user and logs in
+    4. Returns the same response format as regular login
+    """
+    if provider not in SSO_CONFIGS:
+        raise HTTPException(status_code=400, detail=f"Unsupported provider: {provider}")
     
-    elif request.provider == "alipay":
-        existing_user = storage.get_user_by_username(request.username or f"alipay_user_{request.code[:8]}")
-        if existing_user:
-            raise HTTPException(status_code=400, detail="User already exists")
-        
-        user = storage.create_user(
-            username=request.username or f"alipay_user_{request.code[:8]}",
-            auth_provider="alipay",
-            third_party_id=request.code
-        )
-        
-        access_token = create_user_token(user.id)
-        return LoginResponse(user=user, access_token=access_token)
+    config = SSO_CONFIGS[provider]
+    if not config.app_id or not config.app_secret:
+        raise HTTPException(status_code=500, detail=f"{provider} SSO not properly configured")
     
-    else:
-        raise HTTPException(status_code=400, detail="Unsupported provider")
+    try:
+        # Get SSO provider instance
+        sso_provider = SSOFactory.get_provider(provider, config)
+        
+        # Exchange code for access token
+        access_token = await sso_provider.get_access_token(request.code)
+        if not access_token:
+            raise HTTPException(status_code=400, detail="Failed to obtain access token from provider")
+        
+        # Fetch user info from provider
+        user_info = await sso_provider.get_user_info(access_token)
+        if not user_info or not user_info.provider_user_id:
+            raise HTTPException(status_code=400, detail="Failed to obtain user info from provider")
+        
+        # Check if user already exists
+        existing_user = storage.get_user_by_third_party_id(provider, user_info.provider_user_id)
+        
+        if existing_user:
+            # User exists - log them in
+            logger.info(f"SSO login for existing user: {existing_user.username}")
+            token = create_user_token(existing_user.id)
+            return LoginResponse(user=existing_user, access_token=token)
+        else:
+            # Create new user
+            username = user_info.username or f"{provider}_user_{user_info.provider_user_id[:8]}"
+            
+            # Ensure username is unique
+            base_username = username
+            counter = 1
+            while storage.get_user_by_username(username):
+                username = f"{base_username}_{counter}"
+                counter += 1
+            
+            new_user = storage.create_user(
+                username=username,
+                email=user_info.email,
+                auth_provider=provider,
+                third_party_id=user_info.provider_user_id
+            )
+            
+            logger.info(f"Created new user from SSO: {new_user.username}")
+            token = create_user_token(new_user.id)
+            return LoginResponse(user=new_user, access_token=token)
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"SSO callback failed for {provider}: {e}")
+        raise HTTPException(status_code=500, detail="SSO authentication failed")
 
 
 class LogoutRequest(BaseModel):
@@ -204,15 +265,47 @@ def create_task(request: CreateTaskRequest, current_user: User = Depends(get_cur
     return task
 
 @app.get("/api/tasks/{task_id}", response_model=Task)
-def get_task(task_id: str):
+def get_task(task_id: str, current_user: User = Depends(get_current_user)):
     task = storage.get_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+    if task.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to access this task")
     return task
 
 @app.get("/api/tasks/", response_model=list[Task])
-def get_all_tasks():
-    return storage.get_all_tasks()
+def get_all_tasks(current_user: User = Depends(get_current_user)):
+    return storage.get_tasks_by_user(current_user.id)
+
+# TODO: partial update, e.g., appending new requirements, or update existing ones but not all
+@app.put("/api/tasks/{task_id}", response_model=Task)
+def update_task(task_id: str, request: UpdateTaskRequest, current_user: User = Depends(get_current_user)):
+    task = storage.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if task.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to access this task")
+    
+    if request.description is not None:
+        task.description = request.description
+    if request.requirements is not None:
+        task.requirements = request.requirements
+    if request.status is not None:
+        task.status = request.status
+    
+    updated_task = storage.update_task(task)
+    return updated_task
+
+@app.delete("/api/tasks/{task_id}")
+def delete_task(task_id: str, current_user: User = Depends(get_current_user)):
+    task = storage.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if task.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to access this task")
+    
+    storage.delete_task(task_id)
+    return {"message": "Task deleted successfully"}
 
 @app.post("/api/messages/")
 def send_message(request: SendMessageRequest, current_user: User = Depends(get_current_user)):

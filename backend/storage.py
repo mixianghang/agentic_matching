@@ -47,6 +47,12 @@ class InMemoryStorage(StorageBackend):
                 return user
         return None
     
+    def get_user_by_third_party_id(self, auth_provider: str, third_party_id: str) -> Optional[User]:
+        for user in self.users.values():
+            if user.auth_provider == auth_provider and user.third_party_id == third_party_id:
+                return user
+        return None
+    
     def update_user(self, user: User) -> User:
         self.users[user.id] = user
         return user

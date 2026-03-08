@@ -12,6 +12,10 @@ from backend.config import (
     TaskWorkflow,
 )
 
+# Unset SSLKEYLOGFILE to avoid permission errors
+if "SSLKEYLOGFILE" in os.environ:
+    del os.environ["SSLKEYLOGFILE"]
+
 load_dotenv()
 
 # TODO not only a single user message, instead, jointly consider all user messages in the task history to determine the task type, learn fields needed to complete the task
@@ -63,7 +67,21 @@ class AgentSystem:
         """
         Use the configured LLM to determine the most appropriate task type
         based on the user's message history.
+        Falls back to keyword matching if LLM is not available.
         """
+        # If no LLM client, use keyword-based detection
+        if not self.client:
+            message_lower = message.lower()
+            # Rental keywords
+            if any(kw in message_lower for kw in ["租", "房", "住", "室友", "公寓", "housing", "rent"]):
+                return TaskType.RENTAL
+            # Gaming keywords
+            if any(kw in message_lower for kw in ["游戏", "王者", "lol", "吃鸡", "game", "gaming", "队友", "开黑"]):
+                return TaskType.GAMING
+            # Default to dating
+            return TaskType.DATING
+        
+        # Use LLM for classification
         system_prompt = (
             "You are a helpful assistant that classifies user messages into one of the following task types:\n"
             f"- {TaskType.RENTAL}: housing, renting, roommates, accommodation\n"
