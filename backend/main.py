@@ -4,19 +4,78 @@ from fastapi.responses import FileResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from typing import Optional
+from contextlib import asynccontextmanager
 from backend.models import Task, User, Agent
 from backend.storage import storage
 from backend.agent_system import agent_system
 from backend.auth import get_password_hash, verify_password
 from backend.sso import SSOFactory, SSOConfig
+from backend.config import settings
 import uuid
 import logging
 import os
+import sys
+
+# Configure logging
+log_level = os.getenv("LOG_LEVEL", "INFO").upper()
+logging.basicConfig(
+    level=getattr(logging, log_level),
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
 
 logger = logging.getLogger(__name__)
 import secrets
 
-app = FastAPI(title="Agentic Matching System")
+
+def log_config():
+    """输出配置信息（隐藏敏感信息）"""
+    logger.info("=" * 50)
+    logger.info("Server Configuration")
+    logger.info("=" * 50)
+
+    # LLM Configuration
+    logger.info("LLM Configuration:")
+    logger.info(f"  - Model: {settings.MODEL}")
+    logger.info(f"  - Base URL: {settings.BASE_URL}")
+    logger.info(f"  - Temperature: {settings.TEMPERATURE}")
+    logger.info(f"  - Max Tokens: {settings.MAX_TOKENS}")
+    logger.info(f"  - API Key: {'✓ Configured' if settings.OPENAI_API_KEY else '✗ Not configured'}")
+
+    # Storage Configuration
+    logger.info("Storage Configuration:")
+    logger.info(f"  - Storage Type: {settings.STORAGE_TYPE}")
+    if settings.STORAGE_TYPE == "sqlite":
+        logger.info(f"  - Database URL: {settings.DATABASE_URL}")
+    elif settings.STORAGE_TYPE == "postgres":
+        logger.info(f"  - Host: {settings.POSTGRES_HOST}")
+        logger.info(f"  - Port: {settings.POSTGRES_PORT}")
+        logger.info(f"  - User: {settings.POSTGRES_USER}")
+        logger.info(f"  - Database: {settings.POSTGRES_DB}")
+        logger.info(f"  - Password: {'✓ Configured' if settings.POSTGRES_PASSWORD else '✗ Not configured'}")
+
+    # Demand Definition Configuration
+    logger.info("Demand Definition Configuration:")
+    logger.info(f"  - Prompt Mode: {settings.DEMAND_PROMPT_MODE}")
+
+    # SSO Configuration
+    logger.info("SSO Configuration:")
+    logger.info(f"  - WeChat: {'✓ Configured' if os.getenv('WECHAT_APP_ID') else '✗ Not configured'}")
+    logger.info(f"  - Alipay: {'✓ Configured' if os.getenv('ALIPAY_APP_ID') else '✗ Not configured'}")
+
+    logger.info("=" * 50)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """应用生命周期管理"""
+    # 启动时输出配置
+    log_config()
+    yield
+    # 关闭时的清理工作（如果需要）
+
+
+app = FastAPI(title="Agentic Matching System", lifespan=lifespan)
 
 # SSO Configuration
 SSO_CONFIGS = {
@@ -332,6 +391,26 @@ def start_negotiation(request: StartNegotiationRequest, current_user: User = Dep
     agent_system.start_negotiation(request.task1_id, request.task2_id)
     return {"status": "negotiation started"}
 
+
+@app.get("/api/tasks/{task_id}/demand_progress")
+def get_demand_progress(task_id: str, current_user: User = Depends(get_current_user)):
+    """获取需求定义进度"""
+    task = storage.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if task.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to access this task")
+
+    progress = agent_system.get_demand_progress(task_id)
+    return progress
+
+
+@app.get("/api/demand_templates")
+def get_demand_templates():
+    """获取所有可用的需求模板"""
+    from backend.demand_templates import list_all_templates
+    return {"templates": list_all_templates()}
+
 @app.get("/")
 def read_index():
     static_dir = os.path.join(os.path.dirname(__file__), "../static")
@@ -342,3 +421,5 @@ def read_index():
 
 if os.path.exists("static"):
     app.mount("/static", StaticFiles(directory="static"), name="static")
+
+

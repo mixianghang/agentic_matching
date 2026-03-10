@@ -64,4 +64,14 @@ fi
 
 # 启动服务器
 unset SSLKEYLOGFILE
-uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
+
+# 设置日志级别 (DEBUG, INFO, WARNING, ERROR)
+export LOG_LEVEL=${LOG_LEVEL:-INFO}
+# Uvicorn 使用小写的日志级别
+UVICORN_LOG_LEVEL=$(echo "$LOG_LEVEL" | tr '[:upper:]' '[:lower:]')
+
+echo "📝 Log Level: $LOG_LEVEL"
+echo "   Set LOG_LEVEL=DEBUG for verbose output"
+echo ""
+
+uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000 --log-level $UVICORN_LOG_LEVEL

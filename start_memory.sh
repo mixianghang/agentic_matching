@@ -46,5 +46,14 @@ echo "⚠️  Note: All data will be lost when you stop the server!"
 echo "=================================================="
 echo ""
 
+# Set log level (DEBUG, INFO, WARNING, ERROR)
+export LOG_LEVEL=${LOG_LEVEL:-INFO}
+# Uvicorn uses lowercase log levels
+UVICORN_LOG_LEVEL=$(echo "$LOG_LEVEL" | tr '[:upper:]' '[:lower:]')
+
+echo "📝 Log Level: $LOG_LEVEL"
+echo "   Set LOG_LEVEL=DEBUG for verbose output"
+echo ""
+
 # Run the server
-python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
+python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload --log-level $UVICORN_LOG_LEVEL
