@@ -1,6 +1,6 @@
 import os
 import uuid
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from dotenv import load_dotenv
 from backend.models import User, Task, Message, TaskStatus
 from backend.storage import storage
@@ -11,6 +11,7 @@ from backend.config import (
     TASK_TYPE_DESCRIPTIONS,
     TaskWorkflow,
 )
+from backend.demand_definition_v2 import DemandDefinitionEngineV2, DemandState
 
 # Unset SSLKEYLOGFILE to avoid permission errors
 if "SSLKEYLOGFILE" in os.environ:
@@ -18,12 +19,15 @@ if "SSLKEYLOGFILE" in os.environ:
 
 load_dotenv()
 
-# TODO not only a single user message, instead, jointly consider all user messages in the task history to determine the task type, learn fields needed to complete the task
-# Given user messages, retrieve and store task requirements
+
 class AgentSystem:
+    """智能体系统 - 集成需求定义引擎"""
+
     def __init__(self):
         self.storage = storage
         self._init_openai()
+        # 初始化需求定义引擎 V2
+        self.demand_engine = DemandDefinitionEngineV2(llm_client=self if self.client else None)
 
     def _init_openai(self):
         self.client = None
@@ -63,73 +67,119 @@ class AgentSystem:
         else:
             return "收到！我正在理解你的需求。为了更好地帮你，请告诉我：\n\n1. 这是关于什么方面的需求？（比如：租房、相亲、游戏等）\n2. 有什么具体的要求吗？\n\n你说得越详细，我越能帮到你！"
 
-    def _detect_task_type(self, message: str) -> str:
-        """
-        Use the configured LLM to determine the most appropriate task type
-        based on the user's message history.
-        Falls back to keyword matching if LLM is not available.
-        """
-        # If no LLM client, use keyword-based detection
-        if not self.client:
-            message_lower = message.lower()
-            # Rental keywords
-            if any(kw in message_lower for kw in ["租", "房", "住", "室友", "公寓", "housing", "rent"]):
-                return TaskType.RENTAL
-            # Gaming keywords
-            if any(kw in message_lower for kw in ["游戏", "王者", "lol", "吃鸡", "game", "gaming", "队友", "开黑"]):
-                return TaskType.GAMING
-            # Default to dating
-            return TaskType.DATING
-        
-        # Use LLM for classification
-        system_prompt = (
-            "You are a helpful assistant that classifies user messages into one of the following task types:\n"
-            f"- {TaskType.RENTAL}: housing, renting, roommates, accommodation\n"
-            f"- {TaskType.DATING}: dating, relationship, friendship, marriage\n"
-            f"- {TaskType.GAMING}: gaming, team-up, online games, play together\n"
-            "Respond with exactly one word: RENTAL, DATING, or GAMING. Do not include any explanation."
-        )
-        response = self.generate_response(system_prompt, message).strip().upper()
-        if response == TaskType.RENTAL:
-            return TaskType.RENTAL
-        elif response == TaskType.GAMING:
-            return TaskType.GAMING
-        else:
-            return TaskType.DATING
-
     def create_user_agent_interaction(self, task_id: str, user_message: str) -> Message:
+        """处理用户与智能体的交互 - 使用需求定义引擎"""
         task = self.storage.get_task(task_id)
         user = self.storage.get_user(task.user_id)
 
-        is_new_task = task.description == "新建需求对话中..."
+        # 检查是否有关联的需求定义会话
+        session_id = task.metadata.get("demand_session_id") if task.metadata else None
 
-        if is_new_task:
-            task_type = self._detect_task_type(user_message)
-            task.task_type = task_type
-            task.description = user_message
-            task.status = TaskStatus.ACTIVE
+        if not session_id:
+            # 创建新的需求定义会话
+            session = self.demand_engine.create_session(user.id, task.id)
+            session_id = session.session_id
+
+            # 保存会话ID到任务
+            if not task.metadata:
+                task.metadata = {}
+            task.metadata["demand_session_id"] = session_id
             self.storage.update_task(task)
 
-        system_prompt = TaskWorkflow.get_system_prompt(task.task_type, user.username)
-        system_prompt += f"""
+        # 处理用户消息
+        result = self.demand_engine.process_message(session_id, user_message)
 
-        用户当前任务信息：
-        - 任务类型：{TASK_TYPE_NAMES.get(task.task_type, task.task_type)}
-        - 任务描述：{task.description}
-        - 任务状态：{task.status}
-        """
+        # 构建响应消息
+        response_content = result.get("message", "抱歉，我没有理解您的意思。")
 
-        response_content = self.generate_response(system_prompt, user_message)
+        # 获取需求数据
+        demand_data = self.demand_engine.get_demand_data(session_id)
 
+        # 如果类型已识别，更新任务类型
+        if demand_data and demand_data.get("demand_type"):
+            detected_type = demand_data["demand_type"]
+            if task.task_type in ["new", "pending"] or task.task_type != detected_type:
+                task.task_type = detected_type
+                self.storage.update_task(task)
+
+        # 如果需求已完成，更新任务信息
+        if result.get("completed"):
+            task.task_type = demand_data.get("demand_type", task.task_type) if demand_data else task.task_type
+            task.description = self._generate_task_description(demand_data) if demand_data else task.description
+            task.status = TaskStatus.ACTIVE
+
+            # 保存结构化需求数据
+            task.metadata["structured_demand"] = demand_data
+            task.metadata["demand_completed"] = True
+            self.storage.update_task(task)
+
+            response_content += "\n\n✅ 需求已保存，您可以随时查看或修改。"
+
+        # 保存助手回复
         message = Message(
             id=str(uuid.uuid4()),
             sender_id=task.agent_id,
             content=response_content,
         )
-
         self.storage.add_message_to_task(task_id, message)
 
         return message
+
+    def _generate_task_description(self, demand_data: Dict[str, Any]) -> str:
+        """根据需求数据生成任务描述"""
+        demand_type = demand_data.get("type", "")
+        role = demand_data.get("role", "")
+        values = demand_data.get("values", {})
+
+        if demand_type == TaskType.RENTAL:
+            if role == "tenant":
+                location = values.get("location", "未知区域")
+                bedrooms = values.get("bedrooms", "?")
+                max_price = values.get("max_price", "?")
+                return f"租房需求：{bedrooms}卧，预算${max_price}/周，{location}"
+            else:
+                property_type = values.get("property_type", "房源")
+                price = values.get("price", "?")
+                return f"出租{property_type}：${price}/周"
+
+        elif demand_type == TaskType.DATING:
+            gender_pref = values.get("gender_preference", "")
+            age_range = values.get("age_range", {})
+            location = values.get("location", "")
+            min_age = age_range.get("min", "?")
+            max_age = age_range.get("max", "?")
+            return f"相亲交友：{gender_pref}，{min_age}-{max_age}岁，{location}"
+
+        elif demand_type == TaskType.GAMING:
+            return f"游戏组队：{values.get('game_name', '寻找队友')}"
+
+        return "需求定义完成"
+
+    def get_demand_progress(self, task_id: str) -> Dict[str, Any]:
+        """获取需求定义进度"""
+        task = self.storage.get_task(task_id)
+        if not task or not task.metadata:
+            return {"has_session": False}
+
+        session_id = task.metadata.get("demand_session_id")
+        if not session_id:
+            return {"has_session": False}
+
+        session = self.demand_engine.get_session(session_id)
+        if not session:
+            return {"has_session": False}
+
+        return {
+            "has_session": True,
+            "state": session.state.value,
+            "demand_type": session.demand_type,
+            "role": session.role,
+            "filled_fields": session.filled_fields,
+            "pending_fields": [f.name for f in session.pending_fields],
+            "is_complete": self.demand_engine.is_demand_complete(session_id),
+            "values": session.values,
+            "custom_requirements": session.custom_requirements
+        }
 
     def find_matching_tasks(self, task: Task) -> List[Task]:
         all_tasks = self.storage.get_all_tasks()

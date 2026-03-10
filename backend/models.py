@@ -63,3 +63,4 @@ class Task(BaseModel):
     created_at: datetime = Field(default_factory=datetime.now)
     matched_task_ids: List[str] = Field(default_factory=list)
     messages: List[Message] = Field(default_factory=list)
+    metadata: Dict[str, Any] = Field(default_factory=dict)

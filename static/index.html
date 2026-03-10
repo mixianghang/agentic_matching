@@ -614,6 +614,13 @@
                         </div>
 
                         <div class="info-section">
+                            <h4>📊 需求进度</h4>
+                            <div id="demandProgress">
+                                <p style="color: #888; font-size: 14px;">选择任务查看进度</p>
+                            </div>
+                        </div>
+
+                        <div class="info-section">
                             <h4>📝 协商记录</h4>
                             <div id="negotiationLog">
                                 <p style="color: #888; font-size: 14px;">暂无协商记录</p>
@@ -857,7 +864,7 @@
                     <div class="task-item-title">${getTaskTypeName(task.task_type)}</div>
                     <div class="task-item-preview">${task.description.substring(0, 50)}${task.description.length > 50 ? '...' : ''}</div>
                     <div class="task-item-meta">
-                        <span class="task-type-badge">${task.task_type}</span>
+                        <span class="task-type-badge">${getTaskTypeName(task.task_type)}</span>
                         <span class="task-status">${getTaskStatusName(task.status)}</span>
                     </div>
                 </div>
@@ -865,8 +872,8 @@
         }
 
         function getTaskTypeName(type) {
-            const names = { 'dating': '相亲', 'rental': '租房', 'gaming': '游戏' };
-            return names[type] || type;
+            const names = { 'dating': '相亲', 'rental': '租房', 'gaming': '游戏', 'new': '新建', 'pending': '待定' };
+            return names[type] || '新建';
         }
 
         function getTaskStatusName(status) {
@@ -879,7 +886,7 @@
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    task_type: 'dating',
+                    task_type: 'new',
                     description: '新建需求对话中...',
                     requirements: {}
                 })
@@ -892,7 +899,7 @@
             const welcomeMsg = {
                 id: Date.now().toString(),
                 sender_id: 'system',
-                content: '你好！我是你的智能助手。请告诉我你的需求，比如：\n\n• "我想找一个合租室友"\n• "我想认识志同道合的朋友"\n• "我想找人一起打游戏"\n\n请用自然语言描述你的需求吧！',
+                content: '你好！我是你的智能助手。我可以帮您创建以下类型的需求：\n\n🏠 租房 - 找室友或出租房源\n💕 相亲 - 寻找合适的对象\n🎮 游戏 - 找队友一起开黑\n\n请告诉我您需要什么服务？',
                 timestamp: new Date().toISOString()
             };
             addMessageToUI(welcomeMsg, 'agent');
@@ -972,6 +979,115 @@
 
             // 加载匹配结果
             loadMatchResults();
+            
+            // 加载需求进度
+            loadDemandProgress();
+        }
+
+        async function loadDemandProgress() {
+            if (!currentTask) return;
+            
+            try {
+                const response = await apiCall(`/api/tasks/${currentTask.id}/demand_progress`);
+                if (response.ok) {
+                    const progress = await response.json();
+                    renderDemandProgress(progress);
+                }
+            } catch (e) {
+                console.error('加载需求进度失败', e);
+            }
+        }
+
+        function renderDemandProgress(progress) {
+            const container = document.getElementById('demandProgress');
+            
+            if (!progress.has_session) {
+                container.innerHTML = '<p style="color: #888; font-size: 14px;">暂无需求定义会话</p>';
+                return;
+            }
+
+            const stateNames = {
+                'initial': '初始',
+                'identifying_type': '识别类型',
+                'identifying_role': '识别角色',
+                'filling_required': '填写必填项',
+                'filling_optional': '填写选填项',
+                'custom_requirements': '自定义需求',
+                'confirming': '确认中',
+                'completed': '已完成',
+                'modifying': '修改中'
+            };
+
+            let html = `
+                <div class="info-item">
+                    <div class="info-item-title">当前状态</div>
+                    <div class="info-item-desc">
+                        <span style="color: ${progress.is_complete ? '#10b981' : '#f59e0b'};">
+                            ${stateNames[progress.state] || progress.state}
+                            ${progress.is_complete ? ' ✅' : ''}
+                        </span>
+                    </div>
+                </div>
+            `;
+
+            if (progress.demand_type) {
+                html += `
+                    <div class="info-item">
+                        <div class="info-item-title">需求类型</div>
+                        <div class="info-item-desc">${getTaskTypeName(progress.demand_type)}</div>
+                    </div>
+                `;
+            }
+
+            if (progress.role) {
+                const roleNames = {
+                    'tenant': '租客',
+                    'landlord': '房东',
+                    'seeker': '寻求者',
+                    'provider': '提供者'
+                };
+                html += `
+                    <div class="info-item">
+                        <div class="info-item-title">角色</div>
+                        <div class="info-item-desc">${roleNames[progress.role] || progress.role}</div>
+                    </div>
+                `;
+            }
+
+            if (progress.filled_fields && progress.filled_fields.length > 0) {
+                html += `
+                    <div class="info-item">
+                        <div class="info-item-title">已填字段 (${progress.filled_fields.length})</div>
+                        <div class="info-item-desc" style="font-size: 12px;">
+                            ${progress.filled_fields.join(', ')}
+                        </div>
+                    </div>
+                `;
+            }
+
+            if (progress.pending_fields && progress.pending_fields.length > 0) {
+                html += `
+                    <div class="info-item">
+                        <div class="info-item-title">待填字段 (${progress.pending_fields.length})</div>
+                        <div class="info-item-desc" style="font-size: 12px; color: #f59e0b;">
+                            ${progress.pending_fields.join(', ')}
+                        </div>
+                    </div>
+                `;
+            }
+
+            if (progress.custom_requirements && progress.custom_requirements.length > 0) {
+                html += `
+                    <div class="info-item">
+                        <div class="info-item-title">特殊要求</div>
+                        <div class="info-item-desc" style="font-size: 12px;">
+                            ${progress.custom_requirements.map(r => `• ${r}`).join('<br>')}
+                        </div>
+                    </div>
+                `;
+            }
+
+            container.innerHTML = html;
         }
 
         async function loadMatchResults() {

@@ -7,30 +7,48 @@ from backend.config import TaskType
 
 class TestAgentSystem:
     """Test agent system functionality."""
-    
+
     @pytest.fixture
     def agent_system(self):
         """Create an agent system instance."""
         return AgentSystem()
-    
-    def test_detect_task_type_rental(self, agent_system: AgentSystem):
-        """Test task type detection for rental."""
-        message = "我想在朝阳区租个两居室"
-        task_type = agent_system._detect_task_type(message)
-        assert task_type == TaskType.RENTAL
-    
-    def test_detect_task_type_dating(self, agent_system: AgentSystem):
-        """Test task type detection for dating."""
-        message = "我想找个女朋友"
-        task_type = agent_system._detect_task_type(message)
-        assert task_type == TaskType.DATING
-    
-    def test_detect_task_type_gaming(self, agent_system: AgentSystem):
-        """Test task type detection for gaming."""
-        message = "找王者荣耀队友"
-        task_type = agent_system._detect_task_type(message)
-        assert task_type == TaskType.GAMING
-    
+
+    def test_demand_engine_type_detection_rental(self, agent_system: AgentSystem):
+        """Test demand engine type detection for rental."""
+        from backend.demand_definition_v2 import DemandDefinitionEngineV2
+        engine = DemandDefinitionEngineV2()
+        session = engine.create_session("user_123", "task_456")
+
+        # 处理租房相关消息
+        result = engine.process_message(session.session_id, "我想在朝阳区租个两居室")
+
+        # 验证类型被正确识别为 rental
+        assert session.demand_type == TaskType.RENTAL
+
+    def test_demand_engine_type_detection_dating(self, agent_system: AgentSystem):
+        """Test demand engine type detection for dating."""
+        from backend.demand_definition_v2 import DemandDefinitionEngineV2
+        engine = DemandDefinitionEngineV2()
+        session = engine.create_session("user_123", "task_456")
+
+        # 处理相亲相关消息
+        result = engine.process_message(session.session_id, "我想找个女朋友")
+
+        # 验证类型被正确识别为 dating
+        assert session.demand_type == TaskType.DATING
+
+    def test_demand_engine_type_detection_gaming(self, agent_system: AgentSystem):
+        """Test demand engine type detection for gaming."""
+        from backend.demand_definition_v2 import DemandDefinitionEngineV2
+        engine = DemandDefinitionEngineV2()
+        session = engine.create_session("user_123", "task_456")
+
+        # 处理游戏相关消息
+        result = engine.process_message(session.session_id, "找王者荣耀队友")
+
+        # 验证类型被正确识别为 gaming
+        assert session.demand_type == TaskType.GAMING
+
     def test_fallback_response_rental(self, agent_system: AgentSystem):
         """Test fallback response for rental keywords."""
         response = agent_system._fallback_response("我想租房")

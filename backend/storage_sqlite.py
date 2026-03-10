@@ -290,10 +290,11 @@ class SQLiteStorage(StorageBackend):
             matched_task_ids=json.loads(row['matched_task_ids']) if row['matched_task_ids'] else [],
             messages=[]
         )
-        
+
         if include_messages:
-            task.messages = self.get_messages_by_task(task.id)
-        
+            # 延迟加载消息，避免在锁内调用另一个需要锁的方法
+            pass
+
         return task
     
     @with_lock
@@ -325,14 +326,18 @@ class SQLiteStorage(StorageBackend):
             messages=[]
         )
     
+    @with_lock
     def get_task(self, task_id: str) -> Optional[Task]:
         conn = self._get_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM tasks WHERE id = ?", (task_id,))
         row = cursor.fetchone()
-        
+
         if row:
-            return self._row_to_task(row)
+            task = self._row_to_task(row, include_messages=False)
+            # 在锁内加载消息（使用内部方法避免死锁）
+            task.messages = self._get_messages_by_task_internal(task.id)
+            return task
         return None
     
     def get_tasks_by_user(self, user_id: str) -> List[Task]:
@@ -383,12 +388,18 @@ class SQLiteStorage(StorageBackend):
         )
         conn.commit()
     
-    def get_messages_by_task(self, task_id: str) -> List[Message]:
+    def _get_messages_by_task_internal(self, task_id: str) -> List[Message]:
+        """内部方法：获取任务消息（不获取锁，假设调用者已持有锁）"""
         conn = self._get_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM messages WHERE task_id = ? ORDER BY timestamp", (task_id,))
         rows = cursor.fetchall()
         return [self._row_to_message(row) for row in rows]
+
+    @with_lock
+    def get_messages_by_task(self, task_id: str) -> List[Message]:
+        """公共方法：获取任务消息（带锁）"""
+        return self._get_messages_by_task_internal(task_id)
     
     def _row_to_token(self, row) -> Token:
         return Token(
