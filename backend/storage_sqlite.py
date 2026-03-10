@@ -91,9 +91,15 @@ class SQLiteStorage(StorageBackend):
                 content TEXT NOT NULL,
                 timestamp TEXT NOT NULL,
                 is_public INTEGER NOT NULL DEFAULT 0,
+                message_type TEXT NOT NULL DEFAULT 'agent',
                 FOREIGN KEY (task_id) REFERENCES tasks(id)
             )
         """)
+
+        cursor.execute("PRAGMA table_info(messages)")
+        columns = [row['name'] for row in cursor.fetchall()]
+        if 'message_type' not in columns:
+            cursor.execute("ALTER TABLE messages ADD COLUMN message_type TEXT NOT NULL DEFAULT 'agent'")
         
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS tokens (
@@ -147,13 +153,15 @@ class SQLiteStorage(StorageBackend):
         )
     
     def _row_to_message(self, row) -> Message:
+        message_type = row['message_type'] if 'message_type' in row.keys() else 'agent'
         return Message(
             id=row['id'],
             sender_id=row['sender_id'],
             receiver_id=row['receiver_id'],
             content=row['content'],
             timestamp=datetime.fromisoformat(row['timestamp']),
-            is_public=bool(row['is_public'])
+            is_public=bool(row['is_public']),
+            message_type=message_type
         )
     
     @with_lock
@@ -382,9 +390,12 @@ class SQLiteStorage(StorageBackend):
         conn = self._get_connection()
         cursor = conn.cursor()
         cursor.execute(
-            "INSERT INTO messages (id, task_id, sender_id, receiver_id, content, timestamp, is_public) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (message.id, task_id, message.sender_id, message.receiver_id, 
-             message.content, message.timestamp.isoformat(), int(message.is_public))
+            """
+            INSERT INTO messages (id, task_id, sender_id, receiver_id, content, timestamp, is_public, message_type)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (message.id, task_id, message.sender_id, message.receiver_id,
+             message.content, message.timestamp.isoformat(), int(message.is_public), message.message_type)
         )
         conn.commit()
     

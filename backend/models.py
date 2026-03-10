@@ -50,6 +50,7 @@ class Message(BaseModel):
     content: str
     timestamp: datetime = Field(default_factory=datetime.now)
     is_public: bool = False
+    message_type: str = "agent"
 
 
 class Task(BaseModel):

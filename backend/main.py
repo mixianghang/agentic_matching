@@ -5,7 +5,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from typing import Optional
 from contextlib import asynccontextmanager
-from backend.models import Task, User, Agent
+from backend.models import Task, User, Agent, Message
 from backend.storage import storage
 from backend.agent_system import agent_system
 from backend.auth import get_password_hash, verify_password
@@ -321,7 +321,23 @@ def create_task(request: CreateTaskRequest, current_user: User = Depends(get_cur
         request.description,
         request.requirements
     )
-    return task
+
+    welcome_message = Message(
+        id=str(uuid.uuid4()),
+        sender_id=agent.id,
+        receiver_id=current_user.id,
+        content=(
+            "你好！我是你的智能助手。我可以帮您创建以下类型的需求：\n\n"
+            "🏠 租房 - 找室友或出租房源\n"
+            "💕 相亲 - 寻找合适的对象\n"
+            "🎮 游戏 - 找队友一起开黑\n\n"
+            "请告诉我您需要什么服务？"
+        ),
+        message_type="system",
+    )
+    storage.add_message_to_task(task.id, welcome_message)
+
+    return storage.get_task(task.id)
 
 @app.get("/api/tasks/{task_id}", response_model=Task)
 def get_task(task_id: str, current_user: User = Depends(get_current_user)):

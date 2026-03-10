@@ -72,6 +72,16 @@ class AgentSystem:
         task = self.storage.get_task(task_id)
         user = self.storage.get_user(task.user_id)
 
+        # 保存用户消息
+        user_entry = Message(
+            id=str(uuid.uuid4()),
+            sender_id=user.id,
+            receiver_id=task.agent_id,
+            content=user_message,
+            message_type="user",
+        )
+        self.storage.add_message_to_task(task_id, user_entry)
+
         # 检查是否有关联的需求定义会话
         session_id = task.metadata.get("demand_session_id") if task.metadata else None
 
@@ -119,7 +129,9 @@ class AgentSystem:
         message = Message(
             id=str(uuid.uuid4()),
             sender_id=task.agent_id,
+            receiver_id=user.id,
             content=response_content,
+            message_type="agent",
         )
         self.storage.add_message_to_task(task_id, message)
 
