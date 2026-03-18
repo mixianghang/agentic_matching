@@ -22,6 +22,11 @@ class Settings(BaseSettings):
     # 需求定义模块配置
     DEMAND_PROMPT_MODE: str = "separate"  # separate (独立提示词) 或 merged (合并提示词)
 
+    # ASR Configuration
+    ASR_BASE_URL: str = "http://localhost:61234/v1"
+    ASR_API_KEY: str = ""
+    ASR_MODEL: str = "whisper-1"
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

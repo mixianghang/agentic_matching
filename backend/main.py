@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, UploadFile
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -427,13 +427,65 @@ def get_demand_templates():
     from backend.demand_templates import list_all_templates
     return {"templates": list_all_templates()}
 
+
+class ASRResponse(BaseModel):
+    text: str
+
+
+@app.post("/api/asr/transcribe", response_model=ASRResponse)
+async def transcribe_audio(
+    file: UploadFile,
+    current_user: User = Depends(get_current_user),
+):
+    """Transcribe audio via an OpenAI-compatible ASR server."""
+    import io
+    from openai import AsyncOpenAI, APIConnectionError, APIStatusError
+
+    if not settings.ASR_BASE_URL or not settings.ASR_API_KEY:
+        raise HTTPException(status_code=503, detail="ASR service is not configured")
+
+    audio_bytes = await file.read()
+    filename = file.filename or "audio.webm"
+    content_type = file.content_type or "audio/webm"
+
+    client = AsyncOpenAI(
+        api_key=settings.ASR_API_KEY,
+        base_url=settings.ASR_BASE_URL,
+    )
+
+    try:
+        transcription = await client.audio.transcriptions.create(
+            model=settings.ASR_MODEL,
+            file=(filename, io.BytesIO(audio_bytes), content_type),
+        )
+        return ASRResponse(text=transcription.text)
+    except APIConnectionError:
+        logger.error(f"ASR server unreachable at {settings.ASR_BASE_URL}")
+        raise HTTPException(status_code=503, detail="ASR service unavailable")
+    except APIStatusError as e:
+        logger.error(f"ASR server returned error {e.status_code}: {e.message}")
+        raise HTTPException(status_code=502, detail="ASR service error")
+    except Exception as e:
+        logger.error(f"ASR transcription failed: {e}")
+        raise HTTPException(status_code=500, detail="Transcription failed")
+
+
 @app.get("/")
 def read_index():
+    # Prefer Vue build output when available
+    frontend_dist = os.path.join(os.path.dirname(__file__), "../frontend/dist")
+    if os.path.exists(os.path.join(frontend_dist, "index.html")):
+        return FileResponse(os.path.join(frontend_dist, "index.html"))
     static_dir = os.path.join(os.path.dirname(__file__), "../static")
     index_path = os.path.join(static_dir, "index.html")
     if os.path.exists(index_path):
         return FileResponse(index_path)
     return {"message": "Agentic Matching System API is running"}
+
+# Serve Vue build assets (JS/CSS chunks etc.)
+_frontend_dist = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../frontend/dist")
+if os.path.exists(_frontend_dist):
+    app.mount("/assets", StaticFiles(directory=os.path.join(_frontend_dist, "assets")), name="frontend-assets")
 
 if os.path.exists("static"):
     app.mount("/static", StaticFiles(directory="static"), name="static")

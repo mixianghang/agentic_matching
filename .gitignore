@@ -25,6 +25,10 @@ venv/
 ENV/
 env/
 
+# Node
+node_modules/
+frontend/dist/
+
 # Environment variables
 .env
 .env.local
