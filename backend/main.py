@@ -97,10 +97,14 @@ SSO_CONFIGS = {
         state="alipay_auth"
     )
 }
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
 
 
 def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> User:
+    if credentials is None:
+        logger.warning("Missing authorization credentials")
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
     token = credentials.credentials
     if not token:
         logger.warning("Empty token provided")
