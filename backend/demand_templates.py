@@ -352,12 +352,74 @@ DATING_TEMPLATE = DemandTemplate(
 )
 
 
+# ==================== 游戏模板 ====================
+
+GAMING_PLAYER_TEMPLATE = DemandTemplate(
+    template_id="gaming_player",
+    demand_type="gaming",
+    role="player",
+    name="游戏组队",
+    fields=[
+        TemplateField(
+            name="game_name",
+            display_name="游戏名称",
+            field_type=FieldType.STRING,
+            required=True,
+            prompt="您玩什么游戏？",
+            memory_mapping="preferences.gaming.game_name"
+        ),
+        TemplateField(
+            name="rank",
+            display_name="段位/等级",
+            field_type=FieldType.STRING,
+            required=True,
+            prompt="您的当前段位或等级是？",
+            memory_mapping="preferences.gaming.rank"
+        ),
+        TemplateField(
+            name="play_time",
+            display_name="在线时间",
+            field_type=FieldType.STRING,
+            required=True,
+            prompt="您通常什么时间段在线？",
+            memory_mapping="preferences.gaming.play_time"
+        ),
+        TemplateField(
+            name="play_style",
+            display_name="游戏风格",
+            field_type=FieldType.ENUM,
+            required=False,
+            prompt="您的游戏风格是？",
+            options=["casual", "competitive", "any"],
+            memory_mapping="preferences.gaming.play_style"
+        ),
+        TemplateField(
+            name="preferred_rank",
+            display_name="期望队友段位",
+            field_type=FieldType.STRING,
+            required=False,
+            prompt="您期望队友的段位范围是？",
+        ),
+        TemplateField(
+            name="voice_chat",
+            display_name="语音沟通",
+            field_type=FieldType.BOOLEAN,
+            required=False,
+            prompt="您需要语音/开麦的队友吗？",
+        ),
+    ],
+    custom_allowed=True,
+    custom_prompt="还有其他对队友的要求吗？比如特定服务器、英雄偏好等"
+)
+
+
 # ==================== 模板注册表 ====================
 
 TEMPLATE_REGISTRY: Dict[str, DemandTemplate] = {
     "rental_tenant": RENTAL_TENANT_TEMPLATE,
     "rental_landlord": RENTAL_LANDLORD_TEMPLATE,
     "dating_basic": DATING_TEMPLATE,
+    "gaming_player": GAMING_PLAYER_TEMPLATE,
 }
 
 

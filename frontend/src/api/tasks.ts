@@ -71,7 +71,19 @@ export const tasksApi = {
   },
   transcribeAudio(blob: Blob) {
     const form = new FormData()
-    form.append('file', blob, 'audio.webm')
+    const mime = blob.type || 'application/octet-stream'
+    const extMap: Record<string, string> = {
+      'audio/webm': 'webm',
+      'audio/webm;codecs=opus': 'webm',
+      'audio/ogg': 'ogg',
+      'audio/ogg;codecs=opus': 'ogg',
+      'audio/mp4': 'mp4',
+      'audio/mpeg': 'mp3',
+      'audio/wav': 'wav',
+      'audio/x-wav': 'wav',
+    }
+    const ext = extMap[mime] || 'bin'
+    form.append('file', blob, `audio.${ext}`)
     // Do NOT set Content-Type manually — axios must auto-set it with the multipart boundary
     return api.post<never, { text: string }>('/asr/transcribe', form)
   },

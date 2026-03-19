@@ -100,6 +100,12 @@ class SQLiteStorage(StorageBackend):
         columns = [row['name'] for row in cursor.fetchall()]
         if 'message_type' not in columns:
             cursor.execute("ALTER TABLE messages ADD COLUMN message_type TEXT NOT NULL DEFAULT 'agent'")
+
+        # Add metadata column to tasks if missing (migration)
+        cursor.execute("PRAGMA table_info(tasks)")
+        task_columns = [row['name'] for row in cursor.fetchall()]
+        if 'metadata' not in task_columns:
+            cursor.execute("ALTER TABLE tasks ADD COLUMN metadata TEXT")
         
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS tokens (
@@ -286,6 +292,7 @@ class SQLiteStorage(StorageBackend):
         return [self._row_to_agent(row) for row in rows]
     
     def _row_to_task(self, row, include_messages: bool = True) -> Task:
+        row_keys = row.keys()
         task = Task(
             id=row['id'],
             user_id=row['user_id'],
@@ -296,6 +303,7 @@ class SQLiteStorage(StorageBackend):
             status=TaskStatus(row['status']),
             created_at=datetime.fromisoformat(row['created_at']),
             matched_task_ids=json.loads(row['matched_task_ids']) if row['matched_task_ids'] else [],
+            metadata=json.loads(row['metadata']) if 'metadata' in row_keys and row['metadata'] else {},
             messages=[]
         )
 
@@ -368,10 +376,12 @@ class SQLiteStorage(StorageBackend):
         cursor = conn.cursor()
         cursor.execute(
             """UPDATE tasks SET user_id = ?, agent_id = ?, task_type = ?, description = ?, 
-               requirements = ?, status = ?, matched_task_ids = ? WHERE id = ?""",
+               requirements = ?, status = ?, matched_task_ids = ?, metadata = ? WHERE id = ?""",
             (task.user_id, task.agent_id, task.task_type, task.description,
-             json.dumps(task.requirements), task.status.value, 
-             json.dumps(task.matched_task_ids), task.id)
+             json.dumps(task.requirements), task.status.value,
+             json.dumps(task.matched_task_ids),
+             json.dumps(task.metadata) if task.metadata else None,
+             task.id)
         )
         conn.commit()
         return task

@@ -168,7 +168,13 @@ async function handleMicClick() {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
     audioChunks = []
-    const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : ''
+    const preferredMimeTypes = [
+      'audio/ogg;codecs=opus',
+      'audio/webm;codecs=opus',
+      'audio/webm',
+      'audio/mp4',
+    ]
+    const mimeType = preferredMimeTypes.find((t) => MediaRecorder.isTypeSupported(t)) || ''
     mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined)
 
     mediaRecorder.ondataavailable = (e) => {
@@ -181,7 +187,7 @@ async function handleMicClick() {
       if (maxRecordingTimer) { clearTimeout(maxRecordingTimer); maxRecordingTimer = null }
 
       micState.value = 'processing'
-      const blob = new Blob(audioChunks, { type: mimeType || 'audio/webm' })
+      const blob = new Blob(audioChunks, { type: mimeType || 'application/octet-stream' })
       audioChunks = []
 
       try {

@@ -924,8 +924,12 @@
         }
 
         function renderChatHeader() {
+            let title = getTaskTypeName(currentTask.task_type);
+            if (currentTask.task_type === 'new' || currentTask.task_type === 'pending') {
+                title = '需求对话中';
+            }
             document.getElementById('chatHeader').innerHTML = `
-                <h3>${getTaskTypeName(currentTask.task_type)}</h3>
+                <h3>${title}</h3>
                 <p>创建于 ${new Date(currentTask.created_at).toLocaleString('zh-CN')}</p>
             `;
         }
@@ -959,30 +963,32 @@
 
         function renderInfoPanel() {
             document.getElementById('taskActions').style.display = 'flex';
-            document.getElementById('findMatchesBtn').style.display = 
-                (currentTask.status === 'active' || currentTask.status === 'pending') ? 'block' : 'none';
+            const demandCompleted = currentTask.metadata && currentTask.metadata.demand_completed;
+            document.getElementById('findMatchesBtn').style.display = demandCompleted ? 'block' : 'none';
 
-            const requirements = currentTask.requirements || {};
+            const structured = currentTask.metadata && currentTask.metadata.structured_demand;
             let requirementsHtml = '';
-            if (Object.keys(requirements).length > 0) {
-                requirementsHtml = Object.entries(requirements)
+            if (structured && structured.values) {
+                requirementsHtml = Object.entries(structured.values)
                     .map(([key, value]) => `<div class="info-item-desc" style="margin-top: 4px;"><strong>${key}:</strong> ${value}</div>`)
                     .join('');
             }
 
+            const typeName = (currentTask.task_type === 'new' || currentTask.task_type === 'pending')
+                ? '需求对话中...'
+                : getTaskTypeName(currentTask.task_type);
+            const showDescription = currentTask.description && currentTask.description !== '新建需求对话中...';
+
             document.getElementById('taskDetails').innerHTML = `
                 <div class="info-item">
                     <div class="info-item-title">需求类型</div>
-                    <div class="info-item-desc">${getTaskTypeName(currentTask.task_type)}</div>
+                    <div class="info-item-desc">${typeName}</div>
                 </div>
                 <div class="info-item">
                     <div class="info-item-title">状态</div>
                     <div class="info-item-desc">${getTaskStatusName(currentTask.status)}</div>
                 </div>
-                <div class="info-item">
-                    <div class="info-item-title">描述</div>
-                    <div class="info-item-desc">${currentTask.description}</div>
-                </div>
+                ${showDescription ? `<div class="info-item"><div class="info-item-title">描述</div><div class="info-item-desc">${currentTask.description}</div></div>` : ''}
                 ${requirementsHtml ? `<div class="info-item"><div class="info-item-title">具体要求</div>${requirementsHtml}</div>` : ''}
             `;
 
@@ -1009,29 +1015,29 @@
 
         function renderDemandProgress(progress) {
             const container = document.getElementById('demandProgress');
-            
+
             if (!progress.has_session) {
-                container.innerHTML = '<p style="color: #888; font-size: 14px;">暂无需求定义会话</p>';
+                container.innerHTML = '<p style="color: #888; font-size: 14px;">选择任务查看进度</p>';
                 return;
             }
 
             const stateNames = {
-                'initial': '初始',
-                'identifying_type': '识别类型',
-                'identifying_role': '识别角色',
-                'filling_required': '填写必填项',
-                'filling_optional': '填写选填项',
-                'custom_requirements': '自定义需求',
-                'confirming': '确认中',
-                'completed': '已完成',
+                'initial': '了解需求中',
+                'identifying_type': '识别需求类型',
+                'identifying_role': '确认角色',
+                'collecting': '收集需求详情',
+                'confirming': '等待您确认',
+                'completed': '需求定义完成',
                 'modifying': '修改中'
             };
+            const earlyStates = ['initial', 'identifying_type', 'identifying_role'];
+            const statusColor = progress.is_complete ? '#10b981' : (progress.state === 'confirming' ? '#3b82f6' : '#f59e0b');
 
             let html = `
                 <div class="info-item">
                     <div class="info-item-title">当前状态</div>
                     <div class="info-item-desc">
-                        <span style="color: ${progress.is_complete ? '#10b981' : '#f59e0b'};">
+                        <span style="color: ${statusColor};">
                             ${stateNames[progress.state] || progress.state}
                             ${progress.is_complete ? ' ✅' : ''}
                         </span>
@@ -1039,48 +1045,24 @@
                 </div>
             `;
 
-            if (progress.demand_type) {
+            if (progress.demand_type && !earlyStates.includes(progress.state)) {
+                const roleNames = { 'tenant': '租客', 'landlord': '房东', 'seeker': '寻求者', 'provider': '提供者', 'player': '玩家' };
                 html += `
                     <div class="info-item">
                         <div class="info-item-title">需求类型</div>
-                        <div class="info-item-desc">${getTaskTypeName(progress.demand_type)}</div>
+                        <div class="info-item-desc">${getTaskTypeName(progress.demand_type)}${progress.role ? ' · ' + (roleNames[progress.role] || progress.role) : ''}</div>
                     </div>
                 `;
             }
 
-            if (progress.role) {
-                const roleNames = {
-                    'tenant': '租客',
-                    'landlord': '房东',
-                    'seeker': '寻求者',
-                    'provider': '提供者'
-                };
+            if (!earlyStates.includes(progress.state) && progress.values && Object.keys(progress.values).length > 0) {
+                const valueRows = Object.entries(progress.values)
+                    .map(([k, v]) => `<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid #f3f3f3;font-size:12px;"><span style="color:#888;">${k}</span><span style="font-weight:500;color:#333;">${v}</span></div>`)
+                    .join('');
                 html += `
                     <div class="info-item">
-                        <div class="info-item-title">角色</div>
-                        <div class="info-item-desc">${roleNames[progress.role] || progress.role}</div>
-                    </div>
-                `;
-            }
-
-            if (progress.filled_fields && progress.filled_fields.length > 0) {
-                html += `
-                    <div class="info-item">
-                        <div class="info-item-title">已填字段 (${progress.filled_fields.length})</div>
-                        <div class="info-item-desc" style="font-size: 12px;">
-                            ${progress.filled_fields.join(', ')}
-                        </div>
-                    </div>
-                `;
-            }
-
-            if (progress.pending_fields && progress.pending_fields.length > 0) {
-                html += `
-                    <div class="info-item">
-                        <div class="info-item-title">待填字段 (${progress.pending_fields.length})</div>
-                        <div class="info-item-desc" style="font-size: 12px; color: #f59e0b;">
-                            ${progress.pending_fields.join(', ')}
-                        </div>
+                        <div class="info-item-title">已收集信息 (${Object.keys(progress.values).length}项)</div>
+                        <div style="margin-top:8px;">${valueRows}</div>
                     </div>
                 `;
             }
@@ -1101,18 +1083,25 @@
 
         async function loadMatchResults() {
             if (!currentTask) return;
-            
+
+            const demandCompleted = currentTask.metadata && currentTask.metadata.demand_completed;
+            if (!demandCompleted) {
+                document.getElementById('matchResults').innerHTML =
+                    '<p style="color: #888; font-size: 14px;">需求定义完成后可查看匹配结果</p>';
+                return;
+            }
+
             try {
                 const response = await apiCall(`/api/tasks/${currentTask.id}/matches/`);
                 if (response.ok) {
                     const data = await response.json();
                     const matches = data.matches || [];
-                    
+
                     if (matches.length > 0) {
                         document.getElementById('matchResults').innerHTML = matches.map(m => `
-                            <div class="match-item" onclick="startNegotiation('${m.matched_task_id}')">
-                                <div class="match-name">匹配度: ${(m.score * 100).toFixed(1)}%</div>
-                                <div class="match-details">${m.reason || '相似需求'}</div>
+                            <div class="match-item" onclick="startNegotiation('${m.id}')">
+                                <div class="match-name">${getTaskTypeName(m.task_type)}</div>
+                                <div class="match-details">${(m.description || '相似需求').substring(0, 80)}</div>
                             </div>
                         `).join('');
                     } else {
@@ -1245,6 +1234,27 @@
             }
         }
 
+        async function refreshCurrentTask() {
+            if (!currentTask) return;
+            try {
+                const response = await apiCall(`/api/tasks/${currentTask.id}`);
+                if (response.ok) {
+                    const updated = await response.json();
+                    const savedMsgs = currentTask.messages;
+                    Object.assign(currentTask, updated);
+                    // Keep in-memory messages if server returned none (server always has them, but be safe)
+                    if (!currentTask.messages || currentTask.messages.length === 0) {
+                        currentTask.messages = savedMsgs;
+                    }
+                    const idx = tasks.findIndex(t => t.id === currentTask.id);
+                    if (idx >= 0) tasks[idx] = currentTask;
+                }
+            } catch (e) { console.error('刷新任务失败', e); }
+            renderTaskList();
+            renderChatHeader();
+            renderInfoPanel();
+        }
+
         async function sendMessage() {
             const input = document.getElementById('messageInput');
             const content = input.value.trim();
@@ -1279,11 +1289,7 @@
                 addMessageToUI(data.message, 'agent');
                 currentTask.messages.push(data.message);
 
-                if (currentTask.description === '新建需求对话中...') {
-                    currentTask.description = content.substring(0, 100);
-                    renderTaskList();
-                    renderInfoPanel();
-                }
+                await refreshCurrentTask();
             } catch (e) {
                 console.error('发送失败', e);
             }

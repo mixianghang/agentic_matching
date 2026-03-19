@@ -5,6 +5,7 @@ import json
 import uuid
 import os
 import logging
+import re
 from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, field
 from enum import Enum
@@ -75,16 +76,45 @@ class DemandDefinitionSession:
         }
 
 
+def _strip_json_fences(text: str) -> str:
+    """Strip markdown code fences (```json ... ```) from LLM responses."""
+    text = text.strip()
+    if text.startswith("```"):
+        # Remove opening fence (e.g. ```json or ```)
+        first_newline = text.find("\n")
+        if first_newline != -1:
+            text = text[first_newline + 1:]
+        # Remove closing fence
+        if text.endswith("```"):
+            text = text[: text.rfind("```")].rstrip()
+    return text.strip()
+
+
 class DemandDefinitionEngineV2:
     """需求定义引擎 V2 - 支持ACP协议"""
 
-    def __init__(self, llm_client=None, prompt_mode: Optional[str] = None):
+    def __init__(
+        self,
+        llm_client=None,
+        prompt_mode: Optional[str] = None,
+        merged_history_messages: Optional[int] = None,
+    ):
         self.llm_client = llm_client
         self.sessions: Dict[str, DemandDefinitionSession] = {}
 
         # 从环境变量或参数获取提示词模式
         env_mode = os.getenv("DEMAND_PROMPT_MODE", "separate")
         self.prompt_mode = PromptMode(prompt_mode or env_mode)
+
+        # merged 模式下用于意图分类的历史消息条数
+        env_history = os.getenv("DEMAND_MERGED_HISTORY_MESSAGES", "12")
+        if merged_history_messages is not None:
+            self.merged_history_messages = max(1, merged_history_messages)
+        else:
+            try:
+                self.merged_history_messages = max(1, int(env_history))
+            except ValueError:
+                self.merged_history_messages = 12
 
     def _get_dynamic_type_prompt(self) -> str:
         """动态生成需求类型识别提示词"""
@@ -154,11 +184,14 @@ class DemandDefinitionEngineV2:
         # 构建已提取信息
         extracted_info = json.dumps(session.values, ensure_ascii=False, indent=2)
 
-        # 构建待填字段
-        pending_fields_str = "\n".join([
-            f"  - {f.name} ({f.display_name}): {f.prompt}"
-            for f in session.pending_fields[:5]  # 最多显示5个
-        ])
+        # 构建待填字段（含选项，帮助LLM做中-英映射）
+        pending_fields_parts = []
+        for f in session.pending_fields[:5]:  # 最多显示5个
+            line = f"  - {f.name} ({f.display_name}): {f.prompt}"
+            if hasattr(f, 'options') and f.options:
+                line += f"  [选项: {', '.join(f.options)}]"
+            pending_fields_parts.append(line)
+        pending_fields_str = "\n".join(pending_fields_parts)
 
         # 构建历史对话记录
         conversation_history_str = ""
@@ -204,12 +237,15 @@ class DemandDefinitionEngineV2:
     分析用户的历史消息和当前消息，提取所有提到的需求信息。
     判断用户是否提供了足够信息进入下一步。
     基于完整的历史对话上下文，生成自然的回复。
+    对于枚举类型字段，必须从[选项]列表中选择最匹配的值，不能自创选项。
+    例如：中文"单间"对应选项"room"，"公寓"对应"apartment"，"别墅"对应"house"，"单身公寓"对应"studio"。
+    例如："两室一厅"、"两室"或"双人间"对应 bedrooms=2；"单间"或"单人间"对应 bedrooms=1。
   </instruction>
 
   <constraints>
     - 自然、灵活地与用户对话，不要机械地一问一答
     - 一次可以询问多个相关字段
-    - 从用户的自然表述中提取多个字段值
+    - 从用户的历史消息中重新提取所有已提及的信息（不只是当前消息）
     - 如果用户表达不清楚，友好地追问
     - 考虑历史对话的上下文，保持对话的连贯性
   </constraints>
@@ -241,7 +277,7 @@ class DemandDefinitionEngineV2:
         if session.state == DemandState.INITIAL or session.state == DemandState.IDENTIFYING_TYPE:
             return self._get_dynamic_type_prompt()
         elif session.state == DemandState.IDENTIFYING_ROLE:
-            return self._get_dynamic_role_prompt(session.demand_type)
+            return self._get_dynamic_role_prompt(session.demand_type or "")
         else:
             # 使用字段提取提示词
             return self._build_field_extraction_prompt(session, user_message)
@@ -378,8 +414,9 @@ class DemandDefinitionEngineV2:
 
         # ========== 阶段2: 角色识别 ==========
         if session.state == DemandState.IDENTIFYING_ROLE:
-            if not session.role:
-                role = self._detect_role(user_message, session.demand_type)
+            if not session.role and session.demand_type:
+                demand_type = session.demand_type
+                role = self._detect_role(user_message, demand_type)
                 if role:
                     session.role = role
                     extracted_info["role"] = role
@@ -388,7 +425,7 @@ class DemandDefinitionEngineV2:
                     session.state = DemandState.COLLECTING
                 else:
                     # 检查是否只有一个可选角色
-                    templates = [t for t in TEMPLATE_REGISTRY.values() if t.demand_type == session.demand_type]
+                    templates = [t for t in TEMPLATE_REGISTRY.values() if t.demand_type == demand_type]
                     if len(templates) == 1:
                         session.role = templates[0].role
                         self._load_template(session)
@@ -422,9 +459,35 @@ class DemandDefinitionEngineV2:
                         "filled_fields": session.filled_fields,
                         "pending_fields": [f.name for f in session.pending_fields]
                     }
-                    if not session.pending_fields or self._is_completion_intent(user_message, context):
+                    if not session.pending_fields or self._is_completion_intent(
+                        user_message,
+                        context,
+                        session,
+                    ):
                         session.state = DemandState.CONFIRMING
                         return self._move_to_confirming(session)
+                else:
+                    # 用户说"确认"但必填字段还缺 → 明确告知
+                    if self._is_completion_intent(
+                        user_message,
+                        {
+                            "state": session.state.value,
+                            "required_complete": False,
+                            "filled_fields": session.filled_fields,
+                            "pending_fields": [f.name for f in session.pending_fields],
+                        },
+                        session,
+                    ):
+                        missing = [f for f in session.template.fields if f.required and f.name not in session.values]
+                        missing_names = "、".join(f.display_name for f in missing)
+                        return {
+                            "success": True,
+                            "state": session.state.value,
+                            "message": f"还有几个必填信息需要补充才能完成需求：{missing_names}。请继续提供这些信息。",
+                            "extracted": extracted_info,
+                            "pending_count": len(session.pending_fields),
+                            "can_complete": False
+                        }
 
         # ========== 阶段4: 确认阶段 ==========
         if session.state == DemandState.CONFIRMING:
@@ -454,10 +517,9 @@ class DemandDefinitionEngineV2:
             "extracted": extracted_info
         }
 
-    def _detect_role(self, user_message: str, demand_type: str) -> Optional[str]:
-        """
-        从用户消息中检测角色
-        优先使用LLM，回退到关键词匹配
+    def _detect_role_legacy_unused(self, user_message: str, demand_type: str) -> Optional[str]:
+        """从用户消息中检测角色。
+        遗留实现，仅用于兼容，不参与V2主流程。
         """
         # 获取该类型的所有可用角色
         templates = [t for t in TEMPLATE_REGISTRY.values() if t.demand_type == demand_type]
@@ -470,16 +532,16 @@ class DemandDefinitionEngineV2:
         # 尝试使用LLM检测（如果可用）
         if self.llm_client:
             try:
-                role = self._detect_role_with_llm(user_message, demand_type, available_roles)
+                role = self._detect_role_with_llm_legacy_unused(user_message, demand_type, available_roles)
                 if role:
                     return role
             except Exception:
                 pass  # LLM失败时回退到规则匹配
 
         # 回退到关键词匹配
-        return self._detect_role_rule_based(user_message, demand_type, available_roles)
+        return self._detect_role_rule_based_legacy_unused(user_message, demand_type, available_roles)
 
-    def _detect_role_with_llm(
+    def _detect_role_with_llm_legacy_unused(
         self,
         user_message: str,
         demand_type: str,
@@ -503,6 +565,9 @@ class DemandDefinitionEngineV2:
 请只回复角色代码（如：tenant, landlord等），不要包含任何解释。
 如果无法确定角色，请回复"unknown"。"""
 
+        if not self.llm_client:
+            return None
+
         response = self.llm_client.generate_response(
             "You are a helpful assistant that identifies user roles.",
             prompt
@@ -520,30 +585,13 @@ class DemandDefinitionEngineV2:
 
         return None
 
-    def _detect_role_rule_based(
+    def _detect_role_rule_based_legacy_unused(
         self,
         user_message: str,
         demand_type: str,
         available_roles: List[Tuple[str, str]]
     ) -> Optional[str]:
-        """基于规则的角色检测（回退方案）"""
-        message_lower = user_message.lower()
-
-        # 角色关键词映射
-        role_keywords = {
-            "tenant": ["租客", "租户", "租房", "我想租", "我要租", "承租人", "求租"],
-            "landlord": ["房东", "出租", "我有房", "业主", "房主", "房源"],
-            "seeker": ["找对象", "相亲", "我是男生", "我是女生", "我想找", "征友"],
-            "matchmaker": ["红娘", "媒人", "帮别人", "介绍对象", "牵线"],
-            "player": ["玩家", "找队友", "组队", "开黑", "求带"],
-            "team_leader": ["队长", "招队员", "招募", "战队", "公会"],
-        }
-
-        for role, name in available_roles:
-            keywords = role_keywords.get(role, [])
-            if any(kw in message_lower for kw in keywords):
-                return role
-
+        """保留方法签名，V2不再使用关键词规则匹配。"""
         return None
 
     def _load_template(self, session: DemandDefinitionSession) -> None:
@@ -554,66 +602,94 @@ class DemandDefinitionEngineV2:
                 session.template = template
                 session.pending_fields = list(template.fields)
 
-    def _is_completion_intent(self, user_message: str, context: Optional[Dict[str, Any]] = None) -> bool:
+    def _is_completion_intent(
+        self,
+        user_message: str,
+        context: Optional[Dict[str, Any]] = None,
+        session: Optional[DemandDefinitionSession] = None,
+    ) -> bool:
         """
-        判断用户是否有完成意图
-        优先使用LLM，回退到关键词匹配
+        判断用户是否有完成意图。
+        使用LLM分类（支持separate/merged两种模式）。
         """
-        # 尝试使用LLM判断（如果可用）
-        if self.llm_client:
-            try:
-                result = self._detect_completion_intent_with_llm(user_message, context)
-                if result is not None:
-                    return result
-            except Exception:
-                pass  # LLM失败时回退到规则匹配
+        result = self._detect_completion_intent_with_llm(user_message, context, session)
+        return result is True
 
-        # 回退到关键词匹配
-        return self._is_completion_intent_rule_based(user_message)
+    def _classify_intent_with_llm(
+        self,
+        session: Optional[DemandDefinitionSession],
+        user_message: str,
+        labels: List[str],
+        instruction: str,
+        context: Optional[Dict[str, Any]] = None,
+    ) -> Optional[str]:
+        """统一意图分类器：separate模式用独立提示词，merged模式附带对话历史。"""
+        if not self.llm_client:
+            return None
+
+        context_json = json.dumps(context or {}, ensure_ascii=False)
+        labels_str = ", ".join(labels)
+
+        history_block = ""
+        if session and self.prompt_mode == PromptMode.MERGED:
+            history_entries = session.conversation_history[-self.merged_history_messages:]
+            lines = []
+            for entry in history_entries:
+                role = entry.get("role", "user")
+                msg = entry.get("message", "")
+                lines.append(f"- {role}: {msg}")
+            history_block = "\n对话历史：\n" + "\n".join(lines) if lines else ""
+
+        prompt = f"""你是对话状态机意图分类器。\n
+任务：{instruction}
+候选标签：{labels_str}
+当前消息：{user_message}
+上下文：{context_json}{history_block}
+
+请只返回JSON：
+{{
+  "intent": "候选标签之一",
+  "confidence": 0.0
+}}"""
+
+        try:
+            raw = self.llm_client.generate_response(
+                "You are a strict intent classifier that outputs JSON only.",
+                prompt,
+            )
+            parsed = json.loads(_strip_json_fences(raw))
+            intent = str(parsed.get("intent", "")).strip().lower()
+            valid = {label.lower() for label in labels}
+            if intent in valid:
+                return intent
+        except Exception as e:
+            logger.warning(f"[DemandEngine] Intent classification failed: {e}")
+
+        return None
 
     def _detect_completion_intent_with_llm(
         self,
         user_message: str,
-        context: Optional[Dict[str, Any]] = None
+        context: Optional[Dict[str, Any]] = None,
+        session: Optional[DemandDefinitionSession] = None,
     ) -> Optional[bool]:
-        """使用LLM检测完成意图"""
-        context_str = ""
-        if context:
-            filled_count = len(context.get("filled_fields", []))
-            pending_count = len(context.get("pending_fields", []))
-            context_str = f"\n已填写字段数：{filled_count}\n待填写字段数：{pending_count}"
-
-        prompt = f"""你是意图识别专家。判断用户消息是否表示想要完成当前任务或确认信息。
-
-用户消息："{user_message}"{context_str}
-
-请判断用户意图：
-- "complete": 用户明确表示完成、确认、结束
-- "continue": 用户想继续提供信息或询问问题
-- "unclear": 意图不明确
-
-请只回复一个单词（complete/continue/unclear），不要包含任何解释。"""
-
-        response = self.llm_client.generate_response(
-            "You are a helpful assistant that detects user intent.",
-            prompt
-        ).strip().lower()
-
-        if "complete" in response:
+        """使用LLM检测完成意图。"""
+        intent = self._classify_intent_with_llm(
+            session=session,
+            user_message=user_message,
+            labels=["complete", "continue", "unclear"],
+            instruction="判断用户是否在当前轮表达了完成/确认需求。",
+            context=context,
+        )
+        if intent == "complete":
             return True
-        elif "continue" in response:
+        if intent == "continue":
             return False
-
-        return None  # unclear 时返回None，让系统回退到规则匹配
+        return None
 
     def _is_completion_intent_rule_based(self, user_message: str) -> bool:
-        """基于规则的完成意图检测（回退方案）"""
-        completion_keywords = [
-            "完成", "done", "没有了", "就这些", "确认", "可以了", "ok", "好的",
-            "就这样", "没问题", "行", "嗯", "对", "是的", "没错", "结束"
-        ]
-        message_lower = user_message.lower()
-        return any(kw in message_lower for kw in completion_keywords)
+        """保留方法签名，V2不再使用规则匹配。"""
+        return False
 
     def _generate_pipeline_response(self, session: DemandDefinitionSession, extracted_info: Dict[str, Any]) -> str:
         """生成流水线模式的回复
@@ -633,9 +709,9 @@ class DemandDefinitionEngineV2:
 
                 logger.debug(f"[DemandEngine] LLM raw response for pipeline: '{response[:200]}...'")
 
-                # 尝试解析JSON，获取to_user字段
+                # 尝试解析JSON（先剥离 markdown 代码块），获取to_user字段
                 try:
-                    result = json.loads(response)
+                    result = json.loads(_strip_json_fences(response))
                     if "to_user" in result:
                         logger.info(f"[DemandEngine] Generated response via LLM: '{result['to_user'][:50]}...'")
                         return result["to_user"]
@@ -751,21 +827,67 @@ class DemandDefinitionEngineV2:
         return {
             "success": True,
             "state": DemandState.IDENTIFYING_ROLE.value,
-            "message": f"好的，您需要{TASK_TYPE_NAMES.get(session.demand_type, '')}服务。\n\n请问您是：\n" + "\n".join(options) + "\n\n请告诉我您的角色。"
+            "message": f"好的，您需要{TASK_TYPE_NAMES.get(session.demand_type or '', '')}服务。\n\n请问您是：\n" + "\n".join(options) + "\n\n请告诉我您的角色。"
         }
 
     def _handle_role_identification(self, session: DemandDefinitionSession, user_message: str) -> Dict[str, Any]:
         """处理角色识别"""
+        if not session.demand_type:
+            return self._ask_for_type()
         role = self._detect_role(user_message, session.demand_type)
 
         if role:
             session.role = role
             return self._load_template_and_start_collecting(session)
         else:
-            return self._ask_for_role(session)
+            return {
+                "success": True,
+                "state": DemandState.IDENTIFYING_ROLE.value,
+                "message": self._generate_role_retry_response(session, user_message),
+            }
+
+    def _generate_role_retry_response(self, session: DemandDefinitionSession, user_message: str) -> str:
+        """角色识别失败后，生成更自然的追问回复。"""
+        templates = [t for t in TEMPLATE_REGISTRY.values() if t.demand_type == session.demand_type]
+        role_lines = [f"- {t.role}: {t.name}" for t in templates]
+        role_hint = "\n".join(role_lines)
+
+        if self.llm_client:
+            try:
+                prompt = f"""你是一个对话助手。用户当前需求类型是 {session.demand_type}，但角色尚未识别出来。
+
+用户刚才消息：{user_message}
+可选角色：
+{role_hint}
+
+请生成一条自然、简洁、友好的追问，帮助用户明确角色。
+要求：
+- 不要机械重复上一轮原话
+- 可以用用户原句做轻微复述
+- 最后给出清晰可选项或示例回复
+- 控制在1-3句话"""
+
+                response = self.llm_client.generate_response(
+                    "You are a helpful assistant that asks concise clarifying questions.",
+                    prompt,
+                )
+                message = (response or "").strip()
+                if message:
+                    return message
+            except Exception as e:
+                logger.warning(f"[DemandEngine] Role retry response generation failed: {e}")
+
+        # LLM 不可用时回退到固定询问
+        return self._ask_for_role(session)["message"]
 
     def _load_template_and_start_collecting(self, session: DemandDefinitionSession) -> Dict[str, Any]:
         """加载模板并开始收集"""
+        if not session.demand_type or not session.role:
+            return {
+                "success": False,
+                "error": "Missing demand_type or role",
+                "message": "请先确认需求类型和角色"
+            }
         template = get_template_for_role(session.demand_type, session.role)
 
         if not template:
@@ -788,7 +910,7 @@ class DemandDefinitionEngineV2:
         return {
             "success": True,
             "state": session.state.value,
-            "message": f"好的！我来帮您创建{TASK_TYPE_NAMES.get(session.demand_type, '')}需求。\n\n请告诉我您的需求，比如：{field_names}等。您可以一次告诉我多个信息。",
+            "message": f"好的！我来帮您创建{TASK_TYPE_NAMES.get(session.demand_type or '', '')}需求。\n\n请告诉我您的需求，比如：{field_names}等。您可以一次告诉我多个信息。",
             "can_provide_multiple": True
         }
 
@@ -802,7 +924,15 @@ class DemandDefinitionEngineV2:
             }
 
         # 检查是否是完成指令
-        if any(kw in user_message for kw in ["完成", "done", "没有了", "确认"]):
+        if self._is_completion_intent(
+            user_message,
+            {
+                "state": session.state.value,
+                "filled_fields": session.filled_fields,
+                "pending_fields": [f.name for f in session.pending_fields],
+            },
+            session,
+        ):
             if self._is_required_complete(session):
                 return self._move_to_confirming(session)
 
@@ -859,11 +989,11 @@ class DemandDefinitionEngineV2:
 
                 logger.debug(f"[DemandEngine] LLM raw response for extraction: '{response[:200]}...'")
 
-                # 尝试解析JSON
+                # 尝试解析JSON（先剥离 markdown 代码块）
                 try:
-                    result = json.loads(response)
+                    result = json.loads(_strip_json_fences(response))
                     if "extracted" in result:
-                        extracted = result["extracted"]
+                        extracted = self._normalize_extracted_fields(session, result["extracted"], user_message)
                         logger.info(f"[DemandEngine] Fields extracted by LLM: {extracted}")
                         return extracted
                 except json.JSONDecodeError:
@@ -877,11 +1007,165 @@ class DemandDefinitionEngineV2:
             if value is not None:
                 extracted[field.name] = value
 
+        extracted = self._normalize_extracted_fields(session, extracted, user_message)
+
         if extracted:
             logger.info(f"[DemandEngine] Fields extracted by rules: {extracted}")
         else:
             logger.debug("[DemandEngine] No fields extracted by rules")
         return extracted
+
+    def _normalize_extracted_fields(
+        self,
+        session: DemandDefinitionSession,
+        extracted: Dict[str, Any],
+        user_message: str,
+    ) -> Dict[str, Any]:
+        """Map LLM output into the active template schema and coerce values."""
+        if not session.template or not isinstance(extracted, dict):
+            return extracted or {}
+
+        normalized = dict(extracted)
+        role = session.role or ""
+        demand_type = session.demand_type or ""
+
+        if demand_type == "rental":
+            if role == "landlord":
+                if "location" in normalized and "address" not in normalized:
+                    normalized["address"] = normalized.pop("location")
+                if "parking" in normalized and "parking_available" not in normalized:
+                    normalized["parking_available"] = normalized.pop("parking")
+                if "min_lease" in normalized and "min_lease_term" not in normalized:
+                    normalized["min_lease_term"] = normalized.pop("min_lease")
+            elif role == "tenant":
+                if "price" in normalized and "max_price" not in normalized:
+                    normalized["max_price"] = normalized.pop("price")
+                if "address" in normalized and "location" not in normalized:
+                    normalized["location"] = normalized.pop("address")
+                if "parking_available" in normalized and "parking" not in normalized:
+                    normalized["parking"] = normalized.pop("parking_available")
+
+            period = self._detect_price_period(user_message)
+            if period:
+                if "max_price" in normalized and "max_price_period" not in normalized:
+                    normalized["max_price_period"] = period
+                if "price" in normalized and "price_period" not in normalized:
+                    normalized["price_period"] = period
+
+            if "location" in normalized:
+                normalized["location_city"] = self._extract_city(str(normalized["location"]))
+            if "address" in normalized:
+                normalized["address_city"] = self._extract_city(str(normalized["address"]))
+
+            for key in ("lease_term", "min_lease_term"):
+                if key in normalized:
+                    normalized[key] = self._normalize_lease_term(normalized[key])
+
+        if demand_type == "gaming" and "game_name" in normalized:
+            normalized["game_name"] = self._canonical_game_name(str(normalized["game_name"]))
+
+        fields_by_name = {field.name: field for field in session.template.fields}
+        coerced: Dict[str, Any] = {}
+        for key, value in normalized.items():
+            field = fields_by_name.get(key)
+            coerced[key] = self._coerce_field_value(value, field)
+        return coerced
+
+    def _coerce_field_value(self, value: Any, field: Optional[TemplateField]) -> Any:
+        if value is None or field is None:
+            return value
+
+        if field.field_type in {FieldType.INTEGER, FieldType.PRICE}:
+            if isinstance(value, (int, float)):
+                return int(value)
+            if isinstance(value, str):
+                match = re.search(r"\d+", value)
+                if match:
+                    return int(match.group(0))
+            return value
+
+        if field.field_type == FieldType.BOOLEAN:
+            return self._normalize_bool(value)
+
+        if field.field_type == FieldType.ENUM and isinstance(value, str):
+            lowered = value.strip().lower()
+            if field.options:
+                if lowered in field.options:
+                    return lowered
+                if lowered in {"yes", "true", "required", "need"} and "furnished" in field.options:
+                    return "furnished"
+                if lowered in {"no", "false"} and "unfurnished" in field.options:
+                    return "unfurnished"
+            return lowered
+
+        return value
+
+    def _normalize_bool(self, value: Any) -> Any:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            lowered = value.strip().lower()
+            if lowered in {"yes", "true", "required", "need", "needed", "有", "需要", "要", "是"}:
+                return True
+            if lowered in {"no", "false", "none", "without", "没有", "不需要", "不要", "否"}:
+                return False
+        return value
+
+    def _detect_price_period(self, message: str) -> Optional[str]:
+        text = (message or "").lower()
+        if any(token in text for token in ["每月", "/月", "monthly", "per month", "month"]):
+            return "monthly"
+        if any(token in text for token in ["每周", "/周", "weekly", "per week", "week"]):
+            return "weekly"
+        return None
+
+    def _extract_city(self, text: str) -> str:
+        cleaned = (text or "").strip()
+        if not cleaned:
+            return ""
+        city_patterns = [
+            r"([^,\s]+?(?:市|区|县))",
+            r"([A-Za-z]+(?:\s+[A-Za-z]+)*)",
+        ]
+        for pattern in city_patterns:
+            match = re.search(pattern, cleaned)
+            if match:
+                value = match.group(1).strip()
+                if value.endswith(("区", "县")) and len(value) > 1:
+                    return value[:-1]
+                return value
+        return cleaned
+
+    def _canonical_game_name(self, value: str) -> str:
+        lowered = (value or "").strip().lower()
+        aliases = {
+            "lol": "league of legends",
+            "英雄联盟": "league of legends",
+            "league of legends": "league of legends",
+            "王者荣耀": "honor of kings",
+            "honor of kings": "honor of kings",
+            "pubg": "pubg",
+            "绝地求生": "pubg",
+        }
+        return aliases.get(lowered, lowered)
+
+    def _normalize_lease_term(self, value: Any) -> Any:
+        if isinstance(value, str):
+            lowered = value.strip().lower()
+            aliases = {
+                "3": "3_months",
+                "3个月": "3_months",
+                "3 months": "3_months",
+                "6": "6_months",
+                "6个月": "6_months",
+                "6 months": "6_months",
+                "12": "12_months",
+                "12个月": "12_months",
+                "12 months": "12_months",
+                "flexible": "flexible",
+            }
+            return aliases.get(lowered, lowered)
+        return value
 
     def _extract_field_value_rule_based(self, message: str, field: TemplateField) -> Any:
         """基于规则的字段提取"""
@@ -1019,7 +1303,7 @@ class DemandDefinitionEngineV2:
 
     def _handle_confirming(self, session: DemandDefinitionSession, user_message: str) -> Dict[str, Any]:
         """处理确认"""
-        if any(kw in user_message for kw in ["确认", "是的", "正确", "ok", "yes"]):
+        if self._is_confirmation_reply(session, user_message):
             session.state = DemandState.COMPLETED
             return {
                 "success": True,
@@ -1044,6 +1328,21 @@ class DemandDefinitionEngineV2:
 
     def _handle_modifying(self, session: DemandDefinitionSession, user_message: str) -> Dict[str, Any]:
         """处理修改"""
+        if self._is_confirmation_reply(session, user_message) or self._is_no_modification_reply(session, user_message):
+            session.state = DemandState.COMPLETED
+            return {
+                "success": True,
+                "state": session.state.value,
+                "completed": True,
+                "message": "需求创建完成！正在为您寻找匹配...",
+                "demand_data": {
+                    "type": session.demand_type,
+                    "role": session.role,
+                    "values": session.values,
+                    "custom_requirements": session.custom_requirements
+                }
+            }
+
         modified = self._apply_modification(session, user_message)
 
         if modified:
@@ -1056,21 +1355,35 @@ class DemandDefinitionEngineV2:
                 "current_values": session.values
             }
 
+    def _is_confirmation_reply(self, session: DemandDefinitionSession, user_message: str) -> bool:
+        """判断用户是否确认当前需求。"""
+        intent = self._classify_intent_with_llm(
+            session=session,
+            user_message=user_message,
+            labels=["confirm", "modify", "unclear"],
+            instruction="在确认阶段判断用户是确认完成还是要修改需求。",
+            context={"state": DemandState.CONFIRMING.value},
+        )
+        return intent == "confirm"
+
+    def _is_no_modification_reply(self, session: DemandDefinitionSession, user_message: str) -> bool:
+        """判断用户是否明确表示不需要修改。"""
+        intent = self._classify_intent_with_llm(
+            session=session,
+            user_message=user_message,
+            labels=["no_change", "modify", "unclear"],
+            instruction="在修改阶段判断用户是否表示无需修改。",
+            context={"state": DemandState.MODIFYING.value},
+        )
+        return intent == "no_change"
+
     def _detect_demand_type(self, message: str) -> Dict[str, Any]:
         """检测需求类型
 
-        优先使用LLM进行识别，如果没有LLM则回退到规则匹配。
+        使用LLM进行识别。
         返回包含 demand_type, confidence, to_user 的字典。
         """
-        message_lower = message.lower().strip()
         logger.debug(f"[DemandEngine] Detecting demand type for message: '{message[:50]}...'")
-
-        # 动态获取所有类型的关键词
-        type_keywords = {
-            TaskType.RENTAL: ["租", "房", "住", "室友", "公寓", "housing", "rent", "出租"],
-            TaskType.DATING: ["相亲", "交友", "对象", "恋爱", "dating", "relationship", "friendship", "女朋", "男朋", "女票", "男票"],
-            TaskType.GAMING: ["游戏", "王者", "lol", "吃鸡", "game", "gaming", "队友", "开黑", "play"]
-        }
 
         # 优先使用LLM识别（如果可用）
         if self.llm_client:
@@ -1081,15 +1394,16 @@ class DemandDefinitionEngineV2:
                 )
                 logger.debug(f"[DemandEngine] LLM raw response for type detection: '{response}'")
 
-                # 尝试解析JSON响应
+                # 尝试解析JSON响应（先剥离 markdown 代码块）
                 try:
-                    result = json.loads(response)
+                    result = json.loads(_strip_json_fences(response))
                     demand_type = result.get("demand_type", "UNKNOWN").upper()
                     confidence = result.get("confidence", 0.0)
                     to_user = result.get("to_user", "")
 
                     # 检查是否是有效类型
-                    if demand_type in [t.upper() for t in type_keywords.keys()] and confidence >= 0.5:
+                    valid_types = [TaskType.RENTAL.upper(), TaskType.DATING.upper(), TaskType.GAMING.upper()]
+                    if demand_type in valid_types and confidence >= 0.5:
                         logger.info(f"[DemandEngine] Demand type detected by LLM: {demand_type}, confidence: {confidence}")
                         return {
                             "demand_type": demand_type.lower(),
@@ -1107,7 +1421,7 @@ class DemandDefinitionEngineV2:
                 except json.JSONDecodeError:
                     # 回退到旧格式解析
                     response_upper = response.strip().upper()
-                    for demand_type in type_keywords.keys():
+                    for demand_type in [TaskType.RENTAL, TaskType.DATING, TaskType.GAMING]:
                         if response_upper == demand_type.upper():
                             logger.info(f"[DemandEngine] Demand type detected by LLM (legacy format): {demand_type}")
                             return {
@@ -1116,17 +1430,7 @@ class DemandDefinitionEngineV2:
                                 "to_user": ""
                             }
             except Exception as e:
-                logger.warning(f"[DemandEngine] LLM type detection failed: {e}, falling back to rules")
-
-        # 回退到规则匹配：检查是否包含明确的需求关键词
-        for demand_type, keywords in type_keywords.items():
-            if any(kw in message_lower for kw in keywords):
-                logger.info(f"[DemandEngine] Demand type detected by rules: {demand_type}")
-                return {
-                    "demand_type": demand_type,
-                    "confidence": 1.0,
-                    "to_user": ""
-                }
+                logger.warning(f"[DemandEngine] LLM type detection failed: {e}")
 
         logger.debug("[DemandEngine] No demand type detected")
         return {
@@ -1137,35 +1441,24 @@ class DemandDefinitionEngineV2:
 
     def _detect_role(self, message: str, demand_type: str) -> Optional[str]:
         """检测用户角色"""
-        message_lower = message.lower()
-
         templates = [t for t in TEMPLATE_REGISTRY.values() if t.demand_type == demand_type]
 
-        for template in templates:
-            # 为每个角色定义关键词
-            role_keywords = {
-                "tenant": ["租客", "租房", "找房", "tenant", "rent", "找房子"],
-                "landlord": ["房东", "出租", "landlord", "有房", "房子出租"],
-                "seeker": ["找", "寻求", "seeking", "需要", "想要"],
-                "provider": ["提供", "招募", "provider", "供应"]
-            }
-
-            keywords = role_keywords.get(template.role, [template.role])
-            if any(kw in message_lower for kw in keywords):
-                return template.role
+        if len(templates) == 1:
+            return templates[0].role
 
         # 使用LLM识别
         if self.llm_client:
             try:
                 prompt = self._get_dynamic_role_prompt(demand_type)
-                response = self.llm_client.generate_response(prompt, message)
-                return response.strip().lower()
-            except Exception:
-                pass
-
-        # 默认返回第一个角色
-        if templates:
-            return templates[0].role
+                response = self.llm_client.generate_response(prompt, message).strip().lower()
+                valid_roles = {t.role for t in templates}
+                if response in valid_roles:
+                    return response
+                for role in valid_roles:
+                    if role in response:
+                        return role
+            except Exception as e:
+                logger.warning(f"[DemandEngine] LLM role detection failed: {e}")
 
         return None
 
@@ -1191,25 +1484,42 @@ class DemandDefinitionEngineV2:
 
     def _apply_modification(self, session: DemandDefinitionSession, message: str) -> bool:
         """应用修改"""
-        import re
+        if not self.llm_client or not session.template:
+            return False
 
-        patterns = [
-            r"修改\s*(\w+)\s*为\s*(.+)",
-            r"(\w+)\s*改为\s*(.+)",
-            r"把\s*(\w+)\s*改成\s*(.+)",
-            r"(\w+)\s*变成\s*(.+)"
-        ]
+        fields = [{"name": f.name, "display_name": f.display_name} for f in session.template.fields]
+        prompt = f"""你是需求修改解析器。根据用户消息，判断是否在修改字段。
 
-        for pattern in patterns:
-            match = re.search(pattern, message)
-            if match:
-                field_name = match.group(1)
-                new_value = match.group(2).strip()
+用户消息：{message}
+可修改字段：{json.dumps(fields, ensure_ascii=False)}
 
-                for field in session.template.fields:
-                    if field.name == field_name or field.display_name in field_name:
-                        session.values[field.name] = new_value
-                        return True
+请只返回JSON：
+{{
+  "action": "modify|no_change|unclear",
+  "field": "字段name或空",
+  "value": "新值或空"
+}}"""
+
+        try:
+            raw = self.llm_client.generate_response(
+                "You are a strict JSON parser for modification requests.",
+                prompt,
+            )
+            result = json.loads(_strip_json_fences(raw))
+            if str(result.get("action", "")).lower() != "modify":
+                return False
+
+            field_name = str(result.get("field", "")).strip()
+            new_value = result.get("value")
+            if not field_name:
+                return False
+
+            for field in session.template.fields:
+                if field.name == field_name:
+                    session.values[field.name] = new_value
+                    return True
+        except Exception as e:
+            logger.warning(f"[DemandEngine] Modification parsing failed: {e}")
 
         return False
 

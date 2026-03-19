@@ -15,6 +15,9 @@ import uuid
 import logging
 import os
 import sys
+import asyncio
+import subprocess
+import tempfile
 
 # Configure logging
 log_level = os.getenv("LOG_LEVEL", "INFO").upper()
@@ -432,6 +435,82 @@ class ASRResponse(BaseModel):
     text: str
 
 
+def _content_type_to_ext(content_type: str) -> str:
+    content_type = (content_type or "").lower()
+    mapping = {
+        "audio/webm": "webm",
+        "audio/ogg": "ogg",
+        "audio/ogg;codecs=opus": "ogg",
+        "audio/webm;codecs=opus": "webm",
+        "audio/mp4": "mp4",
+        "audio/mpeg": "mp3",
+        "audio/wav": "wav",
+        "audio/x-wav": "wav",
+        "audio/flac": "flac",
+    }
+    return mapping.get(content_type, "")
+
+
+async def _transcode_to_wav_if_needed(audio_bytes: bytes, filename: str, content_type: str):
+    """Convert browser-recorded containers to PCM WAV for ASR servers that cannot decode webm/mp4."""
+    lower_name = (filename or "").lower()
+    ext = lower_name.rsplit(".", 1)[-1] if "." in lower_name else ""
+    if not ext:
+        ext = _content_type_to_ext(content_type)
+
+    needs_transcode = ext in {"webm", "ogg", "opus", "mp4", "m4a", "aac"}
+    if not needs_transcode:
+        return audio_bytes, filename, content_type
+
+    ffmpeg = "ffmpeg"
+    with tempfile.NamedTemporaryFile(suffix=f".{ext or 'bin'}", delete=False) as src:
+        src.write(audio_bytes)
+        src_path = src.name
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as dst:
+        dst_path = dst.name
+
+    try:
+        cmd = [
+            ffmpeg,
+            "-y",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-i",
+            src_path,
+            "-ac",
+            "1",
+            "-ar",
+            "16000",
+            "-c:a",
+            "pcm_s16le",
+            dst_path,
+        ]
+        proc = await asyncio.to_thread(
+            subprocess.run,
+            cmd,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if proc.returncode != 0:
+            logger.error(f"ffmpeg transcode failed: {proc.stderr.strip()}")
+            raise HTTPException(status_code=400, detail="Unsupported audio format")
+
+        with open(dst_path, "rb") as f:
+            wav_bytes = f.read()
+        return wav_bytes, "audio.wav", "audio/wav"
+    except FileNotFoundError:
+        logger.error("ffmpeg is not installed; cannot transcode uploaded audio")
+        raise HTTPException(status_code=503, detail="Audio transcoding unavailable on server")
+    finally:
+        for p in (src_path, dst_path):
+            try:
+                os.remove(p)
+            except FileNotFoundError:
+                pass
+
+
 @app.post("/api/asr/transcribe", response_model=ASRResponse)
 async def transcribe_audio(
     file: UploadFile,
@@ -447,6 +526,11 @@ async def transcribe_audio(
     audio_bytes = await file.read()
     filename = file.filename or "audio.webm"
     content_type = file.content_type or "audio/webm"
+    audio_bytes, filename, content_type = await _transcode_to_wav_if_needed(
+        audio_bytes,
+        filename,
+        content_type,
+    )
 
     client = AsyncOpenAI(
         api_key=settings.ASR_API_KEY,
