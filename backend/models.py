@@ -65,3 +65,6 @@ class Task(BaseModel):
     matched_task_ids: List[str] = Field(default_factory=list)
     messages: List[Message] = Field(default_factory=list)
     metadata: Dict[str, Any] = Field(default_factory=dict)
+    # Match scoring metadata (only populated by /matches endpoint; not persisted in storage)
+    score: Optional[float] = None
+    match_reason: Optional[str] = None

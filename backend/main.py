@@ -5,7 +5,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from typing import Optional
 from contextlib import asynccontextmanager
-from backend.models import Task, User, Agent, Message
+from backend.models import Task, User, Agent, Message, TaskStatus
 from backend.storage import storage
 from backend.agent_system import agent_system
 from backend.auth import get_password_hash, verify_password
@@ -162,7 +162,7 @@ class CreateTaskRequest(BaseModel):
 class UpdateTaskRequest(BaseModel):
     description: Optional[str] = None
     requirements: Optional[dict] = None
-    status: Optional[str] = None
+    status: Optional[TaskStatus] = None
 
 class SendMessageRequest(BaseModel):
     task_id: str

@@ -76,7 +76,9 @@ class SQLiteStorage(StorageBackend):
                 requirements TEXT,
                 status TEXT NOT NULL DEFAULT 'pending',
                 created_at TEXT NOT NULL,
+                updated_at TEXT,
                 matched_task_ids TEXT,
+                metadata TEXT,
                 FOREIGN KEY (user_id) REFERENCES users(id),
                 FOREIGN KEY (agent_id) REFERENCES agents(id)
             )
@@ -106,6 +108,8 @@ class SQLiteStorage(StorageBackend):
         task_columns = [row['name'] for row in cursor.fetchall()]
         if 'metadata' not in task_columns:
             cursor.execute("ALTER TABLE tasks ADD COLUMN metadata TEXT")
+        if 'updated_at' not in task_columns:
+            cursor.execute("ALTER TABLE tasks ADD COLUMN updated_at TEXT")
         
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS tokens (
@@ -376,11 +380,12 @@ class SQLiteStorage(StorageBackend):
         cursor = conn.cursor()
         cursor.execute(
             """UPDATE tasks SET user_id = ?, agent_id = ?, task_type = ?, description = ?, 
-               requirements = ?, status = ?, matched_task_ids = ?, metadata = ? WHERE id = ?""",
+               requirements = ?, status = ?, matched_task_ids = ?, metadata = ?, updated_at = ? WHERE id = ?""",
             (task.user_id, task.agent_id, task.task_type, task.description,
              json.dumps(task.requirements), task.status.value,
              json.dumps(task.matched_task_ids),
              json.dumps(task.metadata) if task.metadata else None,
+             datetime.now().isoformat(),
              task.id)
         )
         conn.commit()

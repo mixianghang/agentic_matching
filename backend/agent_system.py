@@ -1,7 +1,7 @@
 import os
 import uuid
 import re
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 from dotenv import load_dotenv
 from backend.models import User, Task, Message, TaskStatus
 from backend.storage import storage
@@ -138,7 +138,7 @@ class AgentSystem:
 
     def _generate_task_description(self, demand_data: Dict[str, Any]) -> str:
         """根据需求数据生成任务描述"""
-        demand_type = demand_data.get("type", "")
+        demand_type = demand_data.get("demand_type") or demand_data.get("type", "")
         role = demand_data.get("role", "")
         values = demand_data.get("values", {})
 
@@ -198,7 +198,7 @@ class AgentSystem:
 
     def find_matching_tasks(self, task: Task) -> List[Task]:
         all_tasks = self.storage.get_all_tasks()
-        matching_tasks = []
+        matching_tasks: List[Task] = []
         task_demand = (task.metadata or {}).get("structured_demand")
 
         for candidate in all_tasks:
@@ -214,10 +214,129 @@ class AgentSystem:
             if task_demand and cand_demand:
                 if not self._demands_compatible(task_demand, cand_demand):
                     continue
+            score, reason = self._compute_match_score_and_reason(task_demand, cand_demand, task, candidate)
+            matching_tasks.append(self._with_match_metadata(candidate, score, reason))
 
-            matching_tasks.append(candidate)
-
+        # Best-first ordering (score desc, deterministic tie-break)
+        matching_tasks.sort(key=lambda t: (-(t.score if t.score is not None else -1.0), t.id))
         return matching_tasks
+
+    def _with_match_metadata(self, task: Task, score: float, reason: str) -> Task:
+        # Avoid mutating persisted Task objects returned by storage.
+        if hasattr(task, "model_copy"):
+            return task.model_copy(update={"score": score, "match_reason": reason})
+        # Pydantic v1 fallback
+        return task.copy(update={"score": score, "match_reason": reason})
+
+    def _compute_match_score_and_reason(
+        self,
+        task_demand: Optional[Dict[str, Any]],
+        cand_demand: Optional[Dict[str, Any]],
+        target_task: Task,
+        candidate_task: Task,
+    ) -> Tuple[float, str]:
+        if not task_demand or not cand_demand:
+            return 0.5, "缺少结构化需求，采用基础匹配"
+
+        dtype = task_demand.get("demand_type") or task_demand.get("type")
+        if dtype == "rental":
+            score = self._score_rental(task_demand, cand_demand)
+            return score[0], score[1]
+        if dtype == "dating":
+            score = self._score_dating(task_demand, cand_demand)
+            return score[0], score[1]
+        if dtype == "gaming":
+            score = self._score_gaming(task_demand, cand_demand)
+            return score[0], score[1]
+
+        return 0.5, "未知需求类型，采用基础匹配"
+
+    def _score_rental(self, d1: Dict[str, Any], d2: Dict[str, Any]) -> Tuple[float, str]:
+        r1, r2 = d1.get("role"), d2.get("role")
+        tenant_d = d1 if r1 == "tenant" else d2
+        landlord_d = d2 if r1 == "tenant" else d1
+        vt = tenant_d.get("values", {}) or {}
+        vl = landlord_d.get("values", {}) or {}
+
+        loc_t = self._extract_city(vt.get("location_city") or vt.get("location") or vt.get("address"))
+        loc_l = self._extract_city(vl.get("address_city") or vl.get("location_city") or vl.get("address") or vl.get("location"))
+        city_score = 1.0 if (loc_t and loc_l and loc_t == loc_l) else (0.8 if (loc_t or loc_l) else 0.5)
+
+        br_t = vt.get("bedrooms")
+        br_l = vl.get("bedrooms")
+        bedrooms_score = (
+            1.0 if (br_t is not None and br_l is not None and br_t == br_l)
+            else (0.75 if (br_t is not None or br_l is not None) else 0.6)
+        )
+
+        max_price = self._normalize_price_to_weekly(vt.get("max_price"), vt.get("max_price_period"))
+        price = self._normalize_price_to_weekly(vl.get("price"), vl.get("price_period"))
+        if max_price is None and price is None:
+            price_score = 0.4
+        elif max_price is None or price is None:
+            price_score = 0.6
+        else:
+            # Compatibility guarantees max_price >= price (when both exist). Score closer to the asking price higher.
+            if max_price <= 0:
+                price_score = 0.5
+            else:
+                ratio = float(price) / float(max_price)  # in (0,1]
+                price_score = max(0.0, min(1.0, 0.3 + 0.7 * ratio))
+
+        overall = 0.4 * city_score + 0.3 * bedrooms_score + 0.3 * price_score
+        reason = f"租房匹配：{('同城' if loc_t and loc_l and loc_t == loc_l else '区域可匹配')}，卧室匹配，预算覆盖"
+        return max(0.0, min(1.0, overall)), reason
+
+    def _score_dating(self, d1: Dict[str, Any], d2: Dict[str, Any]) -> Tuple[float, str]:
+        v1, v2 = d1.get("values", {}) or {}, d2.get("values", {}) or {}
+
+        # Mutual gender preference: d1 wants v2.gender, and d2 wants v1.gender.
+        gp1, g1 = v1.get("gender_preference"), v1.get("gender")
+        gp2, g2 = v2.get("gender_preference"), v2.get("gender")
+        mutual_gender = bool(gp1 and g2 and gp1 == g2 and gp2 and g1 and gp2 == g1)
+        gender_score = 1.0 if mutual_gender else (0.7 if (gp1 or gp2 or g1 or g2) else 0.5)
+
+        # Age range overlap ratio (0..1), fallback conservative when missing.
+        r1, r2 = v1.get("age_range"), v2.get("age_range")
+        if isinstance(r1, dict) and isinstance(r2, dict):
+            try:
+                min1, max1 = int(r1.get("min")), int(r1.get("max"))
+                min2, max2 = int(r2.get("min")), int(r2.get("max"))
+                overlap = max(0, min(max1, max2) - max(min1, min2))
+                span = max(1, max(max1, max2) - min(min1, min2))
+                overlap_ratio = float(overlap) / float(span)
+                age_score = max(0.0, min(1.0, 0.2 + 0.8 * overlap_ratio))
+            except (TypeError, ValueError):
+                age_score = 0.6
+        else:
+            age_score = 0.6
+
+        loc1 = self._extract_city(v1.get("location_city") or v1.get("location"))
+        loc2 = self._extract_city(v2.get("location_city") or v2.get("location"))
+        city_score = 1.0 if (loc1 and loc2 and loc1 == loc2) else (0.8 if (loc1 or loc2) else 0.5)
+
+        overall = 0.45 * gender_score + 0.35 * age_score + 0.2 * city_score
+        reason = "相亲匹配：性别偏好互补 + 年龄窗口有重叠"
+        return max(0.0, min(1.0, overall)), reason
+
+    def _score_gaming(self, d1: Dict[str, Any], d2: Dict[str, Any]) -> Tuple[float, str]:
+        v1, v2 = d1.get("values", {}) or {}, d2.get("values", {}) or {}
+        g1 = self._canonical_game_name(v1.get("game_name"))
+        g2 = self._canonical_game_name(v2.get("game_name"))
+
+        if g1 and g2 and g1 == g2:
+            game_score = 1.0
+        elif g1 or g2:
+            game_score = 0.65
+        else:
+            game_score = 0.5
+
+        rank1, rank2 = v1.get("rank"), v2.get("rank")
+        rank_score = 1.0 if (rank1 and rank2 and str(rank1).strip().lower() == str(rank2).strip().lower()) else 0.0
+
+        overall = 0.85 * game_score + 0.15 * rank_score
+        reason = f"游戏匹配：{('同游戏' if g1 and g2 and g1 == g2 else '游戏可匹配')}，可选段位参考"
+        return max(0.0, min(1.0, overall)), reason
 
     # ── demand compatibility helpers ─────────────────────────────────────────
 
