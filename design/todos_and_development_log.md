@@ -107,3 +107,121 @@ No further code fixes required. The module is production-ready for the current s
 ### Round 5
 - Issue: The previous test set would not catch schema aliasing, price-period conversion, or city-normalized matches.
 - Fix: Added focused tests for landlord alias normalization, game alias normalization, monthly-vs-weekly rental compatibility, and dating age-range rejection.
+
+---
+
+## Development Log: Privacy-Preserving Agentic Matching Module
+
+**Scope**: `backend/privacy/` (new package), `tests/test_privacy.py`
+**Design reference**: `design/privacy_preserving_agentic_matching_v1.0.md`
+**Test harness**: 83 unit tests across 6 test classes, all passing.
+
+---
+
+### Implementation Design
+
+The module is structured as five focused sub-modules under `backend/privacy/`:
+
+| Sub-module | Responsibility |
+|---|---|
+| `coarsening.py` | Attribute sensitivity taxonomy + coarsening functions |
+| `disclosure.py` | `DisclosureConfig`, `SessionDisclosureBudget`, `DisclosureEvent` |
+| `filter.py` | `PrivacyFilterLayer` (4-stage pipeline) |
+| `negotiation.py` | `make_offer`, `opening_offer`, strategy-obfuscation helpers |
+| `audit.py` | `AuditLog` append-only per-user audit log |
+
+#### `coarsening.py` — Attribute Coarsening (§3)
+
+Implements the 4-level sensitivity taxonomy and all coarsening functions exactly as specified in the design document:
+
+- `coarsen_age(age)` → age band string ("18–24", "late 20s", …)
+- `coarsen_annual_income(income_usd)` → income tier string
+- `coarsen_rent_budget(monthly_usd)` → rent range string
+- `coarsen_occupation(job_title)` → broad category via keyword mapping (technology, healthcare, education, finance, creative, legal, retail, other)
+- `coarsen_location(city, neighbourhood, street_address, target_level)` → max-shareable location at the requested level; raises `ValueError` for Level-3 (street address)
+
+#### `disclosure.py` — Disclosure Controls (§3.3, §4.3, §9)
+
+- `DisclosureLevel` enum: NONE, COARSE, EXACT, CITY, DISTRICT, CATEGORY, RANGE
+- `DisclosureConfig(demand_id)`: per-demand disclosure settings with defaults from the sensitivity table (age→COARSE, income→NONE, occupation→CATEGORY, location→CITY, budget→RANGE). Supports `tighten()`, `widen()`, `revoke()` user controls (§8.2).
+- `SessionDisclosureBudget(session_id, max_attributes_revealed=5)`: tracks distinct Level-1 attributes revealed per session. `can_reveal()` returns True for already-disclosed attributes (free repeat). `budget_exhausted` and `remaining_budget` properties.
+- `DisclosureEvent`: immutable dataclass with UUID event_id, UTC timestamp, demand_id, session_id, peer_agent_id, attribute_name, coarse_value, round_number.
+
+#### `filter.py` — Privacy Filter Layer (§4)
+
+`PrivacyFilterLayer` runs a 4-stage pipeline on every outbound agent message:
+
+1. **Pattern scanner** (§4.2): regex detection of phone numbers, email addresses, SSNs, long numeric IDs, and street addresses. Any match → `FilterResult(blocked=True)`.
+2. **Coarsening transformer**: replaces exact private values from a `private_values` dict with their coarse equivalents; redacts values whose disclosure level is NONE.
+3. **Disclosure-budget checker** (§4.3): blocks the message if any newly-coarsened attribute would exceed the session budget.
+4. **Output validator** (§4.4): final pass blocking exact currency amounts and exact age statements that may have slipped through.
+
+Returns a `FilterResult(message, blocked, reasons, fallback, disclosed_attributes)`. Also provides `build_disclosure_summary()` for the post-session disclosure summary (§8.1).
+
+#### `negotiation.py` — Negotiation Privacy (§6)
+
+- `opening_offer(floor, ceiling)`: first offer at floor + uniform random offset in [0%, 30%] of the range, rounded to nearest $10.
+- `make_offer(floor, ceiling, round_number, total_rounds)`: offer converges from floor toward midpoint over rounds with ±5% noise and rounding to $10. Minimum value is always $10.
+- `should_pause_before_accept(pause_probability=0.25)`: 25% chance of strategic pause before accepting.
+- `should_reject_within_range(reject_probability=0.10)`: 10% chance of rejecting a technically-acceptable offer.
+
+All functions accept an optional `rng` parameter for reproducible testing.
+
+#### `audit.py` — Audit Log (§9)
+
+`AuditLog`: in-process append-only store partitioned by `user_id`. Supports:
+- `append(user_id, event)`: O(1) insert.
+- `get_events(user_id, session_id=None, demand_id=None)`: filtered read.
+- `purge(user_id)`: full deletion (account deletion only).
+- Module-level singleton `audit_log` for production use.
+
+---
+
+### Testing Results
+
+**Test file**: `tests/test_privacy.py` — 83 tests, 0 failures.
+
+| Test class | Tests | Coverage |
+|---|---|---|
+| `TestCoarsenAge` | 10 | All age bands + boundary + invalid |
+| `TestCoarsenAnnualIncome` | 8 | All income tiers + boundaries |
+| `TestCoarsenRentBudget` | 7 | All rent ranges + boundary |
+| `TestCoarsenOccupation` | 9 | All categories + fallback |
+| `TestCoarsenLocation` | 4 | Public / semi-private / private guard |
+| `TestDisclosureConfig` | 6 | Defaults + tighten/widen/revoke + custom override |
+| `TestSessionDisclosureBudget` | 5 | Reveal, repeat, exhaustion, remaining |
+| `TestDisclosureEvent` | 1 | Construction + auto-fields |
+| `TestAuditLog` | 7 | Append, filter, purge, count, isolation |
+| `TestPrivacyFilterLayerPatternScanner` | 5 | Clean + phone + email + street + ID |
+| `TestPrivacyFilterLayerCoarsening` | 4 | Age replace, income redact, tighten, tracking |
+| `TestPrivacyFilterLayerBudget` | 2 | Exhausted blocks, repeat free |
+| `TestPrivacyFilterLayerOutputValidator` | 2 | Currency + age statement |
+| `TestDisclosureSummary` | 1 | Summary format |
+| `TestMakeOffer` | 6 | Range, monotonicity, rounding, minimum, errors |
+| `TestOpeningOffer` | 3 | Floor bound, ceiling bound, error |
+| `TestNegotiationObfuscation` | 3 | Pause prob, reject prob, deterministic seed |
+
+Full test suite (original 81 + new 83): **164 passed, 0 failed**.
+
+---
+
+### Key Design Decisions
+
+1. **No external NER dependency**: The pattern scanner uses regex only, keeping the module dependency-free. NER-based scanning is noted as a future enhancement.
+
+2. **Coarsening is attribute-name-keyed**: The `_apply_coarsening` step in the filter uses a `private_values: Dict[str, value]` dict so callers never need to invoke coarsening functions directly; the filter dispatches automatically.
+
+3. **Repeating an already-disclosed attribute is free**: The `SessionDisclosureBudget.can_reveal()` short-circuits for attributes already in `attributes_revealed`. This matches the design spec and avoids penalising agents for natural conversation repetition.
+
+4. **All randomisation accepts an optional `rng` parameter**: Every negotiation function accepts an optional `random.Random` instance, making the entire negotiation layer deterministically testable without monkey-patching.
+
+5. **Audit log is in-process only**: The current `AuditLog` stores events in memory. Persistence to SQLite can be added by extending `StorageSQLite` following the same pattern as the existing `tasks` table.
+
+---
+
+### Open Items / Future Work
+
+- Integrate `PrivacyFilterLayer` into the live agent message path in `agent_system.py` (requires wrapping `create_user_agent_interaction` output).
+- Persist `DisclosureEvent` records via `storage_sqlite.py` for durability across restarts.
+- Add NER-based scanner (e.g., spaCy `en_core_web_sm`) as an optional enhancement once the dependency cost is acceptable.
+- Expose `DisclosureConfig` controls through the REST API so users can adjust settings via the frontend.
