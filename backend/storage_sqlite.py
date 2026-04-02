@@ -7,6 +7,7 @@ from typing import Dict, List, Optional
 from datetime import datetime, timedelta
 from backend.models import User, Agent, Task, Message, TaskStatus, Token
 from backend.storage_interface import StorageBackend
+from backend.privacy.disclosure import DisclosureEvent
 
 
 def with_lock(func):
@@ -130,7 +131,26 @@ class SQLiteStorage(StorageBackend):
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_agents_user_id ON agents(user_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)")
         cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_third_party_unique ON users(auth_provider, third_party_id) WHERE auth_provider IS NOT NULL AND third_party_id IS NOT NULL")
-        
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS disclosure_events (
+                event_id TEXT PRIMARY KEY,
+                timestamp TEXT NOT NULL,
+                demand_id TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                peer_agent_id TEXT NOT NULL DEFAULT '',
+                attribute_name TEXT NOT NULL,
+                coarse_value TEXT NOT NULL DEFAULT '',
+                round_number INTEGER NOT NULL DEFAULT 0
+            )
+        """)
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_disclosure_events_demand_id ON disclosure_events(demand_id)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_disclosure_events_session_id ON disclosure_events(session_id)"
+        )
+
         conn.commit()
     
     @with_lock
@@ -496,3 +516,61 @@ class SQLiteStorage(StorageBackend):
         cursor.execute("UPDATE tokens SET revoked = 1 WHERE token = ?", (token,))
         conn.commit()
         return cursor.rowcount > 0
+
+    @with_lock
+    def add_disclosure_event(self, event: DisclosureEvent) -> None:
+        """Persist a DisclosureEvent to the disclosure_events table."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """INSERT OR IGNORE INTO disclosure_events
+               (event_id, timestamp, demand_id, session_id, peer_agent_id,
+                attribute_name, coarse_value, round_number)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                event.event_id,
+                event.timestamp.isoformat(),
+                event.demand_id,
+                event.session_id,
+                event.peer_agent_id,
+                event.attribute_name,
+                event.coarse_value,
+                event.round_number,
+            ),
+        )
+        conn.commit()
+
+    def get_disclosure_events(
+        self,
+        demand_id: Optional[str] = None,
+        session_id: Optional[str] = None,
+    ) -> List[DisclosureEvent]:
+        """Return disclosure events filtered by demand_id and/or session_id."""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        query = "SELECT * FROM disclosure_events WHERE 1=1"
+        params: list = []
+        if demand_id:
+            query += " AND demand_id = ?"
+            params.append(demand_id)
+        if session_id:
+            query += " AND session_id = ?"
+            params.append(session_id)
+        query += " ORDER BY timestamp"
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+        events: List[DisclosureEvent] = []
+        for row in rows:
+            events.append(
+                DisclosureEvent(
+                    event_id=row["event_id"],
+                    timestamp=datetime.fromisoformat(row["timestamp"]),
+                    demand_id=row["demand_id"],
+                    session_id=row["session_id"],
+                    peer_agent_id=row["peer_agent_id"],
+                    attribute_name=row["attribute_name"],
+                    coarse_value=row["coarse_value"],
+                    round_number=row["round_number"],
+                )
+            )
+        return events

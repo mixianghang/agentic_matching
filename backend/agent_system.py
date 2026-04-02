@@ -1,6 +1,7 @@
 import os
 import uuid
 import re
+import logging
 from typing import List, Optional, Dict, Any, Tuple
 from dotenv import load_dotenv
 from backend.models import User, Task, Message, TaskStatus
@@ -13,6 +14,16 @@ from backend.config import (
     TaskWorkflow,
 )
 from backend.demand_definition_v2 import DemandDefinitionEngineV2, DemandState
+from backend.privacy import (
+    DisclosureConfig,
+    DisclosureEvent,
+    DisclosureLevel,
+    SessionDisclosureBudget,
+    PrivacyFilterLayer,
+    audit_log,
+)
+
+logger = logging.getLogger(__name__)
 
 # Unset SSLKEYLOGFILE to avoid permission errors
 if "SSLKEYLOGFILE" in os.environ:
@@ -125,6 +136,10 @@ class AgentSystem:
             response_content += "\n\n✅ 需求已保存，您可以随时查看或修改。"
 
         # 保存助手回复
+        response_content = self._apply_privacy_filter(
+            task, session_id, response_content
+        )
+
         message = Message(
             id=str(uuid.uuid4()),
             sender_id=task.agent_id,
@@ -169,6 +184,146 @@ class AgentSystem:
             return f"游戏组队：{values.get('game_name', '寻找队友')}"
 
         return "需求定义完成"
+
+    # ------------------------------------------------------------------
+    # Privacy filter integration (Milestone 1)
+    # ------------------------------------------------------------------
+
+    def _get_disclosure_config(self, task: Task) -> DisclosureConfig:
+        """Return the DisclosureConfig for a task, loading from metadata or creating a default."""
+        metadata = task.metadata or {}
+        raw = metadata.get("disclosure_config")
+        if raw and isinstance(raw, dict):
+            config = DisclosureConfig(demand_id=task.id)
+            level_map = {lvl.value: lvl for lvl in DisclosureLevel}
+            config.age_disclosure = level_map.get(raw.get("age_disclosure", ""), DisclosureLevel.COARSE)
+            config.income_disclosure = level_map.get(raw.get("income_disclosure", ""), DisclosureLevel.NONE)
+            config.occupation_disclosure = level_map.get(raw.get("occupation_disclosure", ""), DisclosureLevel.CATEGORY)
+            config.location_disclosure = level_map.get(raw.get("location_disclosure", ""), DisclosureLevel.CITY)
+            config.budget_disclosure = level_map.get(raw.get("budget_disclosure", ""), DisclosureLevel.RANGE)
+            config.custom_overrides = {
+                k: level_map.get(v, DisclosureLevel.NONE)
+                for k, v in raw.get("custom_overrides", {}).items()
+            }
+            return config
+        return DisclosureConfig(demand_id=task.id)
+
+    def _apply_privacy_filter(
+        self, task: Task, session_id: str, draft_message: str
+    ) -> str:
+        """Run the PrivacyFilterLayer on *draft_message* and return the safe text.
+
+        Persists any DisclosureEvents to storage when the SQLite backend is in use.
+        Falls back to the original message on any unexpected error so as not to
+        break the response path.
+        """
+        try:
+            demand_data = self.demand_engine.get_demand_data(session_id) or {}
+            private_values: Dict[str, Any] = {}
+            values = demand_data.get("values", {}) or {}
+            if "age" in values:
+                private_values["age"] = values["age"]
+            if "income" in values or "annual_income" in values:
+                private_values["income"] = values.get("income") or values.get("annual_income")
+            if "budget" in values or "max_price" in values:
+                private_values["budget"] = values.get("budget") or values.get("max_price")
+            if "occupation" in values or "job" in values:
+                private_values["occupation"] = values.get("occupation") or values.get("job")
+
+            config = self._get_disclosure_config(task)
+            budget = SessionDisclosureBudget(session_id=session_id)
+            pfl = PrivacyFilterLayer(
+                config=config,
+                budget=budget,
+                demand_id=task.id,
+                session_id=session_id,
+                peer_agent_id=task.agent_id,
+            )
+            filter_result = pfl.filter(draft_message, private_values=private_values)
+
+            if filter_result.blocked:
+                logger.info(
+                    "Privacy filter blocked agent message for task %s: %s",
+                    task.id,
+                    filter_result.reasons,
+                )
+                return filter_result.fallback
+
+            # Persist DisclosureEvents if storage supports it
+            if filter_result.disclosed_attributes:
+                from backend.storage_sqlite import SQLiteStorage
+                if isinstance(self.storage, SQLiteStorage):
+                    for attr_name in filter_result.disclosed_attributes:
+                        coarse_val = private_values.get(attr_name, "")
+                        event = DisclosureEvent(
+                            demand_id=task.id,
+                            session_id=session_id,
+                            peer_agent_id=task.agent_id,
+                            attribute_name=attr_name,
+                            coarse_value=str(coarse_val),
+                        )
+                        self.storage.add_disclosure_event(event)
+                        audit_log.append(task.user_id, event)
+
+            return filter_result.message
+        except Exception:
+            logger.exception(
+                "Privacy filter raised an unexpected exception for task %s; "
+                "blocking message to prevent potential data leak",
+                task.id,
+            )
+            return "抱歉，消息处理时出现错误，请稍后重试。"
+
+    def get_disclosure_config_dict(self, task_id: str) -> Dict[str, Any]:
+        """Return the DisclosureConfig for a task as a serialisable dict."""
+        task = self.storage.get_task(task_id)
+        if not task:
+            return {}
+        config = self._get_disclosure_config(task)
+        return {
+            "demand_id": config.demand_id,
+            "age_disclosure": config.age_disclosure.value,
+            "income_disclosure": config.income_disclosure.value,
+            "occupation_disclosure": config.occupation_disclosure.value,
+            "location_disclosure": config.location_disclosure.value,
+            "budget_disclosure": config.budget_disclosure.value,
+            "custom_overrides": {k: v.value for k, v in config.custom_overrides.items()},
+        }
+
+    def update_disclosure_config(self, task_id: str, updates: Dict[str, str]) -> Dict[str, Any]:
+        """Update and persist DisclosureConfig for a task. Returns the new config dict."""
+        task = self.storage.get_task(task_id)
+        if not task:
+            return {}
+
+        config = self._get_disclosure_config(task)
+        level_map = {lvl.value: lvl for lvl in DisclosureLevel}
+        valid_fields = {
+            "age_disclosure", "income_disclosure", "occupation_disclosure",
+            "location_disclosure", "budget_disclosure",
+        }
+        for field, val in updates.items():
+            if field in valid_fields and val in level_map:
+                setattr(config, field, level_map[val])
+            elif field == "custom_overrides" and isinstance(val, dict):
+                config.custom_overrides = {
+                    k: level_map.get(v, DisclosureLevel.NONE) for k, v in val.items()
+                }
+
+        # Persist back into task metadata
+        if not task.metadata:
+            task.metadata = {}
+        task.metadata["disclosure_config"] = {
+            "age_disclosure": config.age_disclosure.value,
+            "income_disclosure": config.income_disclosure.value,
+            "occupation_disclosure": config.occupation_disclosure.value,
+            "location_disclosure": config.location_disclosure.value,
+            "budget_disclosure": config.budget_disclosure.value,
+            "custom_overrides": {k: v.value for k, v in config.custom_overrides.items()},
+        }
+        self.storage.update_task(task)
+
+        return self.get_disclosure_config_dict(task_id)
 
     def get_demand_progress(self, task_id: str) -> Dict[str, Any]:
         """获取需求定义进度"""

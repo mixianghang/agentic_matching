@@ -1,9 +1,9 @@
-from fastapi import FastAPI, HTTPException, Depends, UploadFile
+from fastapi import FastAPI, HTTPException, Depends, UploadFile, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, Dict, Any
 from contextlib import asynccontextmanager
 from backend.models import Task, User, Agent, Message, TaskStatus
 from backend.storage import storage
@@ -18,6 +18,8 @@ import sys
 import asyncio
 import subprocess
 import tempfile
+import time
+import collections
 
 # Configure logging
 log_level = os.getenv("LOG_LEVEL", "INFO").upper()
@@ -79,6 +81,76 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Agentic Matching System", lifespan=lifespan)
+
+# ---------------------------------------------------------------------------
+# Rate limiting (Milestone 1)
+# ---------------------------------------------------------------------------
+# Sliding-window counters keyed by client identifier (IP or user token prefix).
+# Limits are read from environment variables at startup so they can be tuned
+# without code changes.
+_RATE_LIMIT_PER_USER = int(os.getenv("RATE_LIMIT_PER_USER", "60"))   # requests / minute
+_RATE_LIMIT_GLOBAL   = int(os.getenv("RATE_LIMIT_GLOBAL",   "600"))  # requests / minute
+_RATE_WINDOW_SECONDS = 60  # sliding-window size
+
+_per_user_windows: Dict[str, collections.deque] = {}
+_global_window: collections.deque = collections.deque()
+_rate_lock = asyncio.Lock()
+
+# Paths that are exempt from rate limiting (static assets, root index page).
+# Prefix-match: any path starting with one of these strings is exempt.
+_RATE_EXEMPT_PREFIXES = ("/assets/", "/static/", "/favicon")
+# Exact-match exemptions
+_RATE_EXEMPT_EXACT = {"/"}
+
+
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next):
+    """Sliding-window rate limiter applied to every non-exempt HTTP request."""
+    path = request.url.path
+    if path in _RATE_EXEMPT_EXACT or any(path.startswith(p) for p in _RATE_EXEMPT_PREFIXES):
+        return await call_next(request)
+
+    now = time.monotonic()
+    cutoff = now - _RATE_WINDOW_SECONDS
+
+    # Derive a client key: prefer the Authorization token prefix so that the
+    # limit is per-authenticated-user; fall back to IP address for anonymous callers.
+    auth_header = request.headers.get("authorization", "")
+    if auth_header.lower().startswith("bearer "):
+        # Use first 16 chars of the token as a stable key (never store full tokens)
+        client_key = "token:" + auth_header[7:23]
+    else:
+        client_key = "ip:" + (request.client.host if request.client else "unknown")
+
+    async with _rate_lock:
+        # --- Global window ---
+        while _global_window and _global_window[0] < cutoff:
+            _global_window.popleft()
+        if len(_global_window) >= _RATE_LIMIT_GLOBAL:
+            return JSONResponse(
+                status_code=429,
+                content={"detail": "Global rate limit exceeded. Please try again later."},
+                headers={"Retry-After": str(_RATE_WINDOW_SECONDS)},
+            )
+
+        # --- Per-user window ---
+        if client_key not in _per_user_windows:
+            _per_user_windows[client_key] = collections.deque()
+        user_window = _per_user_windows[client_key]
+        while user_window and user_window[0] < cutoff:
+            user_window.popleft()
+        if len(user_window) >= _RATE_LIMIT_PER_USER:
+            return JSONResponse(
+                status_code=429,
+                content={"detail": "Rate limit exceeded. Please slow down."},
+                headers={"Retry-After": str(_RATE_WINDOW_SECONDS)},
+            )
+
+        _global_window.append(now)
+        user_window.append(now)
+
+    return await call_next(request)
+
 
 # SSO Configuration
 SSO_CONFIGS = {
@@ -433,6 +505,95 @@ def get_demand_templates():
     """获取所有可用的需求模板"""
     from backend.demand_templates import list_all_templates
     return {"templates": list_all_templates()}
+
+
+# ---------------------------------------------------------------------------
+# Privacy / DisclosureConfig API (Milestone 1)
+# ---------------------------------------------------------------------------
+
+class DisclosureConfigUpdateRequest(BaseModel):
+    age_disclosure: Optional[str] = None
+    income_disclosure: Optional[str] = None
+    occupation_disclosure: Optional[str] = None
+    location_disclosure: Optional[str] = None
+    budget_disclosure: Optional[str] = None
+    custom_overrides: Optional[Dict[str, str]] = None
+
+
+@app.get("/api/tasks/{task_id}/privacy")
+def get_privacy_config(task_id: str, current_user: User = Depends(get_current_user)):
+    """Return the current DisclosureConfig for a task."""
+    task = storage.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if task.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to access this task")
+    return agent_system.get_disclosure_config_dict(task_id)
+
+
+@app.put("/api/tasks/{task_id}/privacy")
+def update_privacy_config(
+    task_id: str,
+    request: DisclosureConfigUpdateRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """Update the DisclosureConfig for a task.
+
+    Only fields provided in the request body are modified; omitted fields are
+    left unchanged.  Returns the resulting config.
+    """
+    task = storage.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if task.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to access this task")
+
+    updates: Dict[str, Any] = {}
+    for field in [
+        "age_disclosure", "income_disclosure", "occupation_disclosure",
+        "location_disclosure", "budget_disclosure",
+    ]:
+        val = getattr(request, field)
+        if val is not None:
+            updates[field] = val
+    if request.custom_overrides is not None:
+        updates["custom_overrides"] = request.custom_overrides
+
+    result = agent_system.update_disclosure_config(task_id, updates)
+    if not result:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return result
+
+
+@app.get("/api/tasks/{task_id}/disclosure_events")
+def get_disclosure_events(task_id: str, current_user: User = Depends(get_current_user)):
+    """Return persisted DisclosureEvents for a task (SQLite storage only)."""
+    task = storage.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if task.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to access this task")
+
+    from backend.storage_sqlite import SQLiteStorage
+    if not isinstance(storage, SQLiteStorage):
+        return {"events": []}
+
+    events = storage.get_disclosure_events(demand_id=task_id)
+    return {
+        "events": [
+            {
+                "event_id": e.event_id,
+                "timestamp": e.timestamp.isoformat(),
+                "demand_id": e.demand_id,
+                "session_id": e.session_id,
+                "peer_agent_id": e.peer_agent_id,
+                "attribute_name": e.attribute_name,
+                "coarse_value": e.coarse_value,
+                "round_number": e.round_number,
+            }
+            for e in events
+        ]
+    }
 
 
 class ASRResponse(BaseModel):

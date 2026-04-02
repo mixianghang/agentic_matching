@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     ASR_API_KEY: str = ""
     ASR_MODEL: str = "whisper-1"
 
+    # Rate limiting (Milestone 1)
+    RATE_LIMIT_PER_USER: int = 60   # max requests per user per minute
+    RATE_LIMIT_GLOBAL: int = 600    # max total requests per minute across all users
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
