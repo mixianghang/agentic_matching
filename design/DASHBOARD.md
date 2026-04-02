@@ -144,13 +144,13 @@ Agentic Matching replaces form-based marketplaces (dating, rental, gaming, etc.)
 | Vue 3 frontend | ✅ Complete | TaskList, ChatArea, InfoPanel, MessageBubble, mobile responsive |
 | Voice input | ✅ Complete | MediaRecorder → ASR proxy |
 | SSO (WeChat / Alipay) | ✅ Complete | OAuth callback handlers |
-| **Privacy filter → agent path integration** | ⚠️ Pending | `PrivacyFilterLayer` not yet wired into `create_user_agent_interaction` |
+| **Privacy filter → agent path integration** | ✅ Complete | `PrivacyFilterLayer` wired into `create_user_agent_interaction`; events persisted to SQLite |
+| **Disclosure config REST API** | ✅ Complete | `GET/PUT /api/tasks/{id}/privacy`; `GET /api/tasks/{id}/disclosure_events` |
+| **Resource rate limiting** | ✅ Complete | Sliding-window per-user (60 req/min) + global (600 req/min) middleware |
 | **WebSocket real-time comms** | ⚠️ Pending | Currently polling; WebSocket endpoint planned |
 | **Agent-to-agent negotiation** | ⚠️ Pending | Scoring only; live A2A chat pipeline not implemented |
 | **Long/short-term memory** | ⚠️ Pending | Design exists; Redis + vector DB integration not started |
 | **Tool plugin system** | ⚠️ Pending | Interface designed; no concrete tool implemented |
-| **Disclosure config REST API** | ⚠️ Pending | DisclosureConfig exists in-code; no frontend controls |
-| **Resource rate limiting** | ⚠️ Pending | Identified as top-priority in backlog |
 | WeChat OA / Telegram Bot messaging | ⚠️ Pending | SSO done; pub-account messaging integration not done |
 | Additional task types | ⚠️ Pending | Carpool, property, second-hand templates defined; not wired |
 | PostgreSQL backend | ⚠️ Pending | Abstraction ready; production backend not configured |
@@ -168,15 +168,11 @@ Ordered by dependency and impact. Each milestone builds on the previous one.
 
 ---
 
-### Milestone 1 — Privacy Filter Integration & Resource Rate Limiting
+### ~~Milestone 1 — Privacy Filter Integration & Resource Rate Limiting~~ ✅ COMPLETE
 
-**Why first**: The privacy module is complete and tested but not connected to the live message path. Rate limiting is flagged as the highest-priority backlog item and a prerequisite for any public deployment.
+**Completed**: 2026-04-02
 
-**Deliverables**:
-- Wire `PrivacyFilterLayer` into `agent_system.create_user_agent_interaction()` so every outbound agent message passes through the 4-stage filter before being stored or returned
-- Persist `DisclosureEvent` records to SQLite (extend `StorageSQLite`)
-- Expose `DisclosureConfig` controls through REST API (`GET/PUT /api/tasks/{id}/privacy`)
-- Implement per-user and global request rate limiting (token-bucket or sliding window) to prevent abuse and DoS
+See [Development Log](todos_and_development_log.md) for implementation details.
 
 ---
 

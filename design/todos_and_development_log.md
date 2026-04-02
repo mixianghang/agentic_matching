@@ -4,7 +4,111 @@
 * 支持支付付费功能
 * 单Unit的并发机制以及多节点部署机制，实现高并发处理
 * 多语言支持，作为底层，自动翻译，不需要改变默认的中文
-* Top-1: 资源限制模块, 单个与整体的资源限制，无论用户是免费用户还是付费用户，都需要限制资源使用，防止滥用，防止DOS攻击。
+* ~~Top-1: 资源限制模块, 单个与整体的资源限制，无论用户是免费用户还是付费用户，都需要限制资源使用，防止滥用，防止DOS攻击。~~ ✅ Done (Milestone 1)
+
+---
+
+## Development Log: Milestone 1 — Privacy Filter Integration & Resource Rate Limiting
+
+**Date**: 2026-04-02
+**Scope**: `backend/agent_system.py`, `backend/storage_sqlite.py`, `backend/main.py`, `backend/config.py`
+**Test harness**: `tests/test_milestone1.py` (20 tests — 0 failures)
+**Outcome**: All 4 deliverables implemented and passing. Full test suite grows from 164 → 184 tests.
+
+---
+
+### Implementation Overview
+
+#### 1. Privacy Filter → Agent Path Integration
+
+`AgentSystem.create_user_agent_interaction()` in `backend/agent_system.py` now calls `_apply_privacy_filter()` on every draft agent reply before it is stored or returned.
+
+`_apply_privacy_filter()`:
+- Extracts structured private values (age, income, budget, occupation) from the active demand session's `values` dict.
+- Loads the task's `DisclosureConfig` from `task.metadata["disclosure_config"]` (or uses defaults if absent).
+- Constructs a `SessionDisclosureBudget` keyed by `session_id`.
+- Runs `PrivacyFilterLayer.filter()` (all 4 stages: pattern scanner → coarsening → budget check → output validator).
+- If `blocked=True`, substitutes the fallback message.
+- If attributes were disclosed and storage is `SQLiteStorage`, persists a `DisclosureEvent` row for each attribute and appends to the in-process `AuditLog`.
+- If an unexpected exception occurs, the original message passes through unfiltered and the error is logged (fail-open to preserve UX).
+
+#### 2. DisclosureEvent Persistence (SQLiteStorage)
+
+Added `disclosure_events` table to `SQLiteStorage.initialize()`:
+```sql
+CREATE TABLE IF NOT EXISTS disclosure_events (
+    event_id TEXT PRIMARY KEY,
+    timestamp TEXT NOT NULL,
+    demand_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    peer_agent_id TEXT NOT NULL DEFAULT '',
+    attribute_name TEXT NOT NULL,
+    coarse_value TEXT NOT NULL DEFAULT '',
+    round_number INTEGER NOT NULL DEFAULT 0
+)
+```
+
+Two new methods:
+- `add_disclosure_event(event: DisclosureEvent)` — `INSERT OR IGNORE` for idempotent inserts (same `event_id` is safe to call twice).
+- `get_disclosure_events(demand_id=None, session_id=None)` — filtered read, `ORDER BY timestamp`.
+
+Migration-safe: the table is created with `CREATE TABLE IF NOT EXISTS`, so existing DBs are unaffected.
+
+#### 3. DisclosureConfig REST API
+
+Three new endpoints in `backend/main.py`:
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/tasks/{task_id}/privacy` | Return current `DisclosureConfig` as JSON |
+| `PUT` | `/api/tasks/{task_id}/privacy` | Partially update disclosure settings; persists to `task.metadata` |
+| `GET` | `/api/tasks/{task_id}/disclosure_events` | Return persisted `DisclosureEvent`s (SQLite only; in-memory returns `[]`) |
+
+`AgentSystem` exposes two new methods used by these endpoints:
+- `get_disclosure_config_dict(task_id)` — reads config from metadata, returns serializable dict.
+- `update_disclosure_config(task_id, updates)` — applies partial updates and persists back to metadata via `storage.update_task()`.
+
+#### 4. Rate Limiting Middleware
+
+Sliding-window rate limiter implemented as a FastAPI `@app.middleware("http")` in `backend/main.py`:
+- **Per-user limit**: 60 req/min (configurable via `RATE_LIMIT_PER_USER` env var or `settings.RATE_LIMIT_PER_USER`).
+- **Global limit**: 600 req/min (configurable via `RATE_LIMIT_GLOBAL`).
+- Client key: first 16 characters of the Bearer token (hashed by prefix, never full token) or `"ip:<address>"` for unauthenticated callers.
+- Static/asset paths (`/assets/`, `/static/`) are exempt.
+- Returns HTTP 429 with `{"detail": "..."}` and `Retry-After: 60` header when either limit is exceeded.
+- Counters are stored in module-level `collections.deque` objects under a shared `asyncio.Lock()`.
+
+---
+
+### Testing Results
+
+**Test file**: `tests/test_milestone1.py` — 20 tests, 0 failures.
+
+| Test class | Tests | Coverage |
+|---|---|---|
+| `TestDisclosureConfigAPI` | 6 | GET/PUT privacy config; auth, 404, 403 guards |
+| `TestDisclosureEventsAPI` | 2 | GET disclosure events; auth guard |
+| `TestSQLiteDisclosureEvents` | 4 | add, filter, idempotent insert, empty list |
+| `TestPrivacyFilterSmoke` | 4 | clean message, phone, email, budget exhaustion |
+| `TestRateLimiting` | 4 | within limit, per-user 429, global 429, Retry-After header |
+
+---
+
+### Key Design Decisions
+
+1. **Fail-open privacy filter**: If `_apply_privacy_filter` raises an unexpected exception (e.g., storage error), the draft message passes through unfiltered. This prioritises UX stability over strict privacy enforcement in edge cases; the exception is always logged for investigation.
+
+2. **Config stored in task metadata**: `DisclosureConfig` is persisted as `task.metadata["disclosure_config"]` rather than a dedicated table. This avoids a new DB table, keeps the config co-located with the task it belongs to, and is consistent with how `demand_session_id` and `structured_demand` are already stored.
+
+3. **Sliding window over token bucket**: The sliding-window approach is simpler to implement correctly in a single-process server and gives an exact count of requests in the last 60 seconds. Token-bucket would be appropriate if the server is scaled horizontally (requires Redis), noted as a future upgrade path.
+
+4. **16-char token prefix as rate-limit key**: Never storing the full token avoids creating a secondary lookup table for tokens. The 16-char prefix is sufficient to identify a user for rate-limiting purposes while limiting exposure if the in-memory deque were somehow accessible.
+
+---
+
+### Open Items / Next Milestone
+
+- Milestone 2: Agent-to-Agent Negotiation & Real-Time Communication
 
 ---
 
