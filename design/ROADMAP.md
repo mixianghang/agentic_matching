@@ -1,220 +1,86 @@
-# Agentic Matching System - 路线图
+# Agentic Matching System — Roadmap & Status
 
-## 1. 项目概览
+## Current Status (May 2026)
 
-一个基于智能体对话的需求匹配系统，替代传统电商、交友、找房等平台，让智能体代表用户完成长序列交互任务。
-
-### 当前系统状态
-
-| 模块 | 状态 | 完成度 | 备注 |
-|------|------|--------|------|
-| **后端框架** | ✅ 已实现 | 100% | FastAPI 基础框架 |
-| **数据模型** | ✅ 已实现 | 100% | User, Agent, Task, Message |
-| **存储层** | ⚠️ 临时实现 | 50% | InMemoryStorage，需要数据库持久化 |
-| **智能体系统** | ✅ 已实现 | 90% | 支持对话、任务检测、匹配 |
-| **配置管理** | ✅ 已实现 | 100% | config.py 支持 .env 文件 |
-| **API 端点** | ✅ 已实现 | 90% | 基础 CRUD 操作 |
-| **前端界面** | ⚠️ 部分实现 | 60% | 登录/注册界面，主布局 |
-| **任务类型** | ✅ 已实现 | 80% | DATING, RENTAL, GAMING |
-| **工作流** | ✅ 已实现 | 70% | 基础任务工作流 |
-
-## 2. 路线图规划
-
-### 2.1 短期目标（1-2周）
-
-| 里程碑 | 任务 | 预计完成时间 | 优先级 | 状态 |
-|--------|------|------------|--------|------|
-| **前端完善** | 完善主应用界面 | 3天 | ⭐⭐⭐ | 待开始 |
-| **前端完善** | 实现任务列表功能 | 2天 | ⭐⭐⭐ | 待开始 |
-| **前端完善** | 实现聊天界面交互 | 3天 | ⭐⭐⭐ | 待开始 |
-| **前端完善** | 实现信息面板展示 | 2天 | ⭐⭐⭐ | 待开始 |
-| **后端增强** | 实现数据库持久化 | 3天 | ⭐⭐⭐⭐ | 待开始 |
-| **后端增强** | 完善用户认证系统 | 2天 | ⭐⭐⭐⭐ | 待开始 |
-| **后端增强** | 实现 WebSocket 实时通信 | 3天 | ⭐⭐⭐ | 待开始 |
-| **功能完善** | 完善匹配算法 | 2天 | ⭐⭐⭐ | 待开始 |
-| **测试部署** | 单元测试和集成测试 | 2天 | ⭐⭐ | 待开始 |
-
-### 2.2 中期目标（2-4周）
-
-| 里程碑 | 任务 | 预计完成时间 | 优先级 | 状态 |
-|--------|------|------------|--------|------|
-| **外部集成** | 微信公众号集成 | 3天 | ⭐⭐⭐ | 待开始 |
-| **外部集成** | Telegram Bot 集成 | 2天 | ⭐⭐ | 待开始 |
-| **功能扩展** | 添加新任务类型 | 3天 | ⭐⭐⭐ | 待开始 |
-| **工具系统** | 实现工具组件系统 | 4天 | ⭐⭐⭐ | 待开始 |
-| **工具系统** | 集成基础工具（人脸识别、身份验证等） | 3天 | ⭐⭐ | 待开始 |
-| **隐私保护** | 实现差分隐私机制 | 3天 | ⭐⭐⭐ | 待开始 |
-| **性能优化** | 系统性能优化 | 2天 | ⭐⭐ | 待开始 |
-| **监控系统** | 添加系统监控和日志 | 2天 | ⭐⭐ | 待开始 |
-
-### 2.3 长期目标（1-3个月）
-
-| 里程碑 | 任务 | 预计完成时间 | 优先级 | 状态 |
-|--------|------|------------|--------|------|
-| **国际化** | 多语言支持 | 3天 | ⭐⭐ | 待开始 |
-| **移动应用** | 移动端应用开发 | 10天 | ⭐⭐⭐ | 待开始 |
-| **数据分析** | 实现数据分析和推荐系统 | 5天 | ⭐⭐⭐ | 待开始 |
-| **企业级** | 企业级部署方案 | 4天 | ⭐⭐ | 待开始 |
-| **工作流** | 支持更复杂的工作流 | 5天 | ⭐⭐⭐ | 待开始 |
-| **AI 增强** | 增强智能体能力 | 4天 | ⭐⭐⭐ | 待开始 |
-| **生态系统** | 开发者 API 和插件系统 | 6天 | ⭐⭐ | 待开始 |
-
-## 3. 技术实现路线
-
-### 3.1 后端技术栈演进
-
-| 阶段 | 技术 | 说明 | 完成时间 |
-|------|------|------|----------|
-| 阶段1 | FastAPI + InMemoryStorage | 基础原型 | ✅ 已完成 |
-| 阶段2 | FastAPI + SQLite | 开发环境 | 1周 |
-| 阶段3 | FastAPI + PostgreSQL | 生产环境 | 2周 |
-| 阶段4 | FastAPI + PostgreSQL + Redis | 高性能生产环境 | 3周 |
-
-### 3.2 前端技术栈演进
-
-| 阶段 | 技术 | 说明 | 完成时间 |
-|------|------|------|----------|
-| 阶段1 | 原生 HTML/CSS/JS | 基础原型 | ✅ 已完成 |
-| 阶段2 | 原生 HTML/CSS/JS + WebSocket | 实时通信 | 1周 |
-| 阶段3 | 框架选择评估 | 技术选型 | 2周 |
-| 阶段4 | 现代化前端框架 | 生产级前端 | 3周 |
-
-### 3.3 AI 系统演进
-
-| 阶段 | 技术 | 说明 | 完成时间 |
-|------|------|------|----------|
-| 阶段1 | 基础 LLM 集成 | DeepSeek API | ✅ 已完成 |
-| 阶段2 | 多模型支持 | OpenAI, Claude 等 | 2周 |
-| 阶段3 | 微调模型 | 领域特定微调 | 1个月 |
-| 阶段4 | 多智能体协作 | 复杂任务分解 | 2个月 |
-
-## 4. 进度跟踪方案
-
-### 4.1 项目管理工具
-
-建议使用 **GitHub Projects** 或 **Jira** 进行项目管理：
-
-- **GitHub Projects**：
-  - 利用现有 GitHub 仓库
-  - 看板视图管理任务
-  - 与 GitHub Issues 集成
-  - 适合小型团队
-
-- **Jira**：
-  - 更强大的项目管理功能
-  - 支持 Scrum/Kanban 方法
-  - 详细的报告和指标
-  - 适合中大型团队
-
-### 4.2 任务分解模板
-
-每个任务应包含以下信息：
-
-| 字段 | 说明 | 示例 |
-|------|------|------|
-| **任务ID** | 唯一标识符 | `FE-001` |
-| **任务名称** | 简短描述 | 完善主应用界面 |
-| **任务描述** | 详细说明 | 实现任务列表、聊天区域、信息面板的完整功能 |
-| **优先级** | 紧急程度 | P1（高） |
-| **工作量** | 预估时间 | 3天 |
-| **负责人** | 任务负责人 | 张三 |
-| **状态** | 当前状态 | 待开始 |
-| **依赖** | 前置任务 | `FE-001` |
-| **截止日期** | 完成时间 | 2026-03-01 |
-
-### 4.3 里程碑定义
-
-| 里程碑 | 日期 | 描述 | 检查点 |
-|--------|------|------|--------|
-| **Alpha 版本** | 2026-03-01 | 基础功能完整，可用于内部测试 | 前端完善、数据库持久化、用户认证 |
-| **Beta 版本** | 2026-03-15 | 功能完整，可用于外部测试 | 外部集成、工具系统、隐私保护 |
-| **RC 版本** | 2026-03-30 | 预发布版本，准备正式上线 | 性能优化、监控系统、文档完善 |
-| **1.0 版本** | 2026-04-15 | 正式上线版本 | 所有核心功能完整，稳定运行 |
-
-### 4.4 风险评估
-
-| 风险 | 影响 | 可能性 | 缓解措施 |
-|------|------|--------|----------|
-| **API 调用限制** | 影响智能体响应速度 | 中 | 实现缓存机制，降级策略 |
-| **数据库性能** | 影响系统响应速度 | 中 | 合理索引，查询优化 |
-| **前端复杂度** | 影响开发效率 | 高 | 模块化设计，组件复用 |
-| **隐私合规** | 影响系统合法性 | 高 | 严格遵循隐私法规，透明化处理 |
-| **用户体验** | 影响用户留存 | 高 | 持续用户测试，迭代优化 |
-| **技术债务** | 影响系统可维护性 | 中 | 定期重构，代码审查 |
-
-## 5. 优先级排序
-
-### 5.1 功能优先级矩阵
-
-| 功能 | 紧急度 | 重要度 | 优先级 |
-|------|--------|--------|--------|
-| **前端完善** | 高 | 高 | P0 |
-| **数据库持久化** | 高 | 高 | P0 |
-| **用户认证系统** | 高 | 高 | P0 |
-| **WebSocket 实时通信** | 中 | 高 | P1 |
-| **匹配算法** | 中 | 高 | P1 |
-| **微信公众号集成** | 中 | 中 | P2 |
-| **Telegram Bot 集成** | 低 | 中 | P3 |
-| **工具组件系统** | 中 | 中 | P2 |
-| **隐私保护机制** | 高 | 中 | P1 |
-| **多语言支持** | 低 | 低 | P4 |
-| **移动端应用** | 中 | 低 | P3 |
-| **数据分析和推荐** | 低 | 中 | P3 |
-
-### 5.2 资源分配建议
-
-| 角色 | 短期（1-2周） | 中期（2-4周） | 长期（1-3个月） |
-|------|--------------|--------------|----------------|
-| **后端开发** | 数据库、认证、WebSocket | 外部集成、工具系统 | 性能优化、企业级部署 |
-| **前端开发** | 界面完善、交互实现 | 框架迁移、响应式优化 | 移动应用、国际化 |
-| **AI 开发** | 匹配算法、智能体优化 | 多模型支持、工作流增强 | 微调模型、多智能体协作 |
-| **测试** | 单元测试、集成测试 | 性能测试、安全测试 | 用户测试、回归测试 |
-| **DevOps** | 基础部署、监控 | CI/CD 流程、容器化 | 云原生架构、自动扩缩容 |
-
-## 6. 成功指标
-
-### 6.1 技术指标
-
-| 指标 | 目标值 | 测量方法 |
-|------|--------|----------|
-| **响应时间** | < 500ms | 性能测试 |
-| **并发用户** | > 1000 | 负载测试 |
-| **错误率** | < 0.1% | 监控系统 |
-| **代码覆盖率** | > 80% | 测试工具 |
-| **部署时间** | < 5分钟 | CI/CD 工具 |
-
-### 6.2 业务指标
-
-| 指标 | 目标值 | 测量方法 |
-|------|--------|----------|
-| **用户注册** | > 1000/月 | 分析工具 |
-| **任务创建** | > 500/月 | 分析工具 |
-| **匹配成功率** | > 60% | 业务分析 |
-| **用户满意度** | > 4.5/5 | 用户调查 |
-| **留存率** | > 30% | 分析工具 |
-
-## 7. 结论
-
-本路线图文档为 Agentic Matching System 提供了详细的实现规划，从当前的基础原型逐步演进到生产级系统。通过分阶段的目标设定和优先级排序，确保系统能够快速迭代并逐步完善。
-
-### 关键成功因素：
-
-1. **快速迭代**：优先实现核心功能，快速获得用户反馈
-2. **技术选型**：根据实际需求选择合适的技术栈
-3. **质量保障**：持续的测试和监控
-4. **用户体验**：始终以用户为中心设计功能
-5. **团队协作**：明确的职责分工和有效的沟通
-
-### 下一步行动：
-
-1. **启动短期目标**：优先实现前端完善和数据库持久化
-2. **建立项目管理**：创建 GitHub Projects 或 Jira 项目
-3. **分配任务**：根据团队情况分配具体任务
-4. **定期回顾**：每周进行项目进度回顾和调整
-5. **用户反馈**：尽早邀请用户测试，获取反馈
+| Module | Status | Notes |
+|--------|--------|-------|
+| **Backend framework** | ✅ Done | FastAPI with lifespan, logging, structured error handling |
+| **Data models** | ✅ Done | User, Agent, Task, Message, Token (Pydantic v2) |
+| **Storage layer** | ✅ Done | InMemory (test), SQLite (dev), PostgreSQL interface defined |
+| **Agent system** | ✅ Done | LLM gateway, fallback for missing API key, ACP protocol integration |
+| **Demand definition** | ✅ Done | Template-driven, 5-scenario tested, two-step confirmation |
+| **Matching algorithm** | ⚠️ Basic | `SimpleMatcher` (keyword + requirements overlap). Needs semantic/LLM-based matching |
+| **Auth** | ✅ Done | Local (bcrypt + JWT), WeChat SSO, Alipay SSO |
+| **ASR / Voice input** | ✅ Done | Browser recording → backend proxy → Whisper-compatible endpoint |
+| **Frontend** | ✅ Done | Vue 3 + Vite + Vant 4 + Pinia, login, chat, task list, info panel |
+| **Reputation system** | ❌ Not started | Agent-driven verification design written, implementation pending |
+| **Privacy negotiation** | ❌ Not started | Differential privacy design exists, not implemented |
+| **Multi-agent negotiation** | ❌ Not started | Current matching is 1:1 comparison; agent-to-agent dialogue not yet built |
+| **Tests** | ⚠️ Partial | Auth, tasks, matching iteration, demand integration (5 scenarios). Coverage < 80% |
 
 ---
 
-**文档更新时间**：2026-02-24
-**版本**：1.0
-**作者**：系统开发团队
+## Phase 1: Production Readiness (Next 2–4 weeks)
+
+| Priority | Task | Effort | Why |
+|----------|------|--------|-----|
+| P0 | Semantic/LLM-based matching | 5d | Keyword matching is insufficient for real-world diversity |
+| P0 | PostgreSQL production deployment | 3d | SQLite cannot scale to concurrent production loads |
+| P0 | Test coverage > 80% | 3d | Prevent regression as feature velocity increases |
+| P1 | Multi-agent negotiation (agent-to-agent dialogue) | 5d | Core differentiator; currently only 1:1 comparison |
+| P1 | Rate limiting & resource quotas | 3d | Prevent abuse, enable metered usage for free/paid tiers |
+| P1 | WebSocket real-time updates | 3d | Users need push notifications for match progress |
+| P2 | Expand task type registry | 4d | Add `medical`, `legal`, `caregiving`, `intimate` types |
+| P2 | CI/CD pipeline | 2d | Automated test + deploy for faster iteration |
+
+---
+
+## Phase 2: Trust & Verification (1–2 months)
+
+| Priority | Task | Effort | Why |
+|----------|------|--------|-----|
+| P0 | Credential attestation framework | 7d | Foundation for verified reputation; cryptographic signing of credentials |
+| P0 | Health certificate verification | 5d | Critical for intimate/medical use cases; STD test verification flow |
+| P1 | Identity verification (government ID + face match) | 5d | Required for high-trust transactions (rental, legal, medical) |
+| P1 | Multi-dimensional reputation model | 5d | Replace star ratings with composable trust signals |
+| P1 | Progressive disclosure protocol | 5d | Negotiate what information to reveal and when during agent dialogue |
+| P2 | Differential privacy implementation | 5d | Protect sensitive attributes during matching and negotiation |
+
+---
+
+## Phase 3: Platform Scale (2–4 months)
+
+| Priority | Task | Effort | Why |
+|----------|------|--------|-----|
+| P0 | Distributed agent runtime (multi-node) | 10d | Horizontal scaling for agent processing |
+| P1 | Long/short memory system | 7d | Vector-based user profiling for smarter matching and prefilling |
+| P1 | Tool registry & plugin system | 7d | Extensible tools: face verify, document scan, property lookup, geo-filter |
+| P1 | Payment & billing integration | 5d | Support paid tiers, per-match fees, premium verification |
+| P2 | WeChat Mini Program | 7d | Primary distribution channel in China |
+| P2 | Data import pipeline | 5d | Batch import from offline sources (e.g., 相亲角 paper ads) |
+| P2 | Multi-language support | 3d | English + auto-translation layer |
+
+---
+
+## Success Metrics
+
+| Metric | Target |
+|--------|--------|
+| API response time | < 500ms p95 |
+| Concurrent users | > 1000 (Phase 2) |
+| Matching precision@5 | > 60% user-accepted matches |
+| Credential verification accuracy | > 99% |
+| Test coverage | > 80% |
+| Deployment time | < 5 min (CI/CD) |
+
+---
+
+## Risk Register
+
+| Risk | Impact | Mitigation |
+|------|--------|------------|
+| LLM API rate limits / cost | Blocks all agent functionality | Caching, tiered models (small local for simple tasks), fallback to rule-based |
+| Privacy regulation compliance | Legal liability | Differential privacy, data minimization, right-to-deletion |
+| Fraudulent credential submissions | Undermines reputation system | Require third-party attestation (clinics, government APIs), manual audit for high-stakes transactions |
+| Cold start (empty user base) | No matches possible | Seed data, synthetic demand generation, focus on high-retention niche first |
+| Multi-language LLM quality | Poor UX for non-Chinese users | English prompt templates, model selection by language |

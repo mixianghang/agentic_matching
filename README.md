@@ -12,6 +12,12 @@
 
 ---
 
+## 设计文档
+
+系统愿景、架构设计、开发路线图详见 [`design/`](design/) 目录。快速入口：
+- [DESIGN.md](design/DESIGN.md) — 系统愿景、核心设计意图、架构
+- [ROADMAP.md](design/ROADMAP.md) — 当前状态与开发计划
+
 ## 前置条件
 
 - Python 3.10+

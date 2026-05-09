@@ -1,252 +1,213 @@
-# Agentic Matching System - 系统设计文档
+# Agentic Matching System — Master Design Document
 
-## 1. 系统概述
+## 1. Vision: Matching for Everything
 
-一个基于智能体对话的需求匹配系统，替代传统电商、交友、找房等平台，让智能体代表用户完成长序列交互任务。
+### 1.1 The Problem with Search
 
-### 核心理念
+美团、高德、淘宝、百合网——all dominant platforms are built on the same paradigm: **search-based recommendation**. You type keywords, the platform returns a ranked list of results. This model has fundamental limitations:
 
-- **用户代理**：每个用户有一个或多个智能体作为线上代表
-- **自然语言交互**：通过聊天而非表单来定义需求
-- **智能匹配**：智能体通过多轮对话寻找匹配方并协商细节
-- **持续运行**：任务一直运行直到用户标记完成
+1. **Counterparty offline.** Search catalogs static listings. The provider (restaurant owner, landlord, seller) isn't present to negotiate, clarify terms, or adapt offers in real time. You browse, read sparse descriptions, and make decisions with incomplete information—a labor-intensive, high-friction process.
 
-### 主要特色
-* **多智能体系统**：每个用户可以有一个或多个智能体，每个智能体都有自己的角色和行为模式
-* **隐私保护**：系统采用差分隐私等技术，保护代理系统不泄漏用户隐私
-* **可扩展性**：系统设计为可扩展的，未来可以添加新的任务类型和智能体角色
-* **任务工作流**：系统支持定义和执行复杂的任务工作流，例如相亲、租房、游戏组队等
-* **数据导入**： 系统支持各类线下以及外部数据的智能批量导入，例如公园相亲角中的纸质相亲广告的批量导入。
+2. **Information sparsity.** "Is this specific dish available tonight? How spicy can they make it? Can I sit by the window?" These questions are unanswerable through search. The platform reduces a rich service offering to a few photos and a star rating, forcing the user to fill the gap with guesswork and phone calls.
 
-## 2. 系统架构
+3. **Privacy-as-afterthought.** Many real-world needs are inherently privacy-sensitive—booking a sensitive medical consultation, finding a caregiver for a disabled family member, arranging an intimate encounter (one-night stand), seeking mental health support. Traditional platforms expose your query, profile, and transaction history to the platform operator, creating privacy and safety risks that deter honest use.
 
-### 2.1 整体架构
+### 1.2 The Agentic Answer
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                        前端层                                │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐   │
-│  │ Web 界面     │  │ 微信公众号    │  │ Telegram Bot │   │
-│  └──────────────┘  └──────────────┘  └──────────────┘   │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│                      FastAPI 后端层                          │
-│  ┌───────────────────────────────────────────────────────┐ │
-│  │                   主应用服务                             │ │
-│  │  - 用户认证                                            │ │
-│  │  - 任务管理                                            │ │
-│  │  - WebSocket 实时通信                                  │ │
-│  └───────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────┘
-                              │
-        ┌─────────────────────┼─────────────────────┐
-        ▼                     ▼                     ▼
-┌───────────────┐   ┌───────────────┐   ┌───────────────┐
-│  智能体系统   │   │   存储层      │   │   工具组件    │
-│  (Agent)      │   │  (Storage)    │   │  (Tools)      │
-└───────────────┘   └───────────────┘   └───────────────┘
-```
+Agentic Matching replaces search with **negotiation**: autonomous agents that represent both supply and demand sides, engage in multi-turn dialogue, verify claims programmatically, and negotiate terms—all while enforcing privacy boundaries.
 
-### 2.2 核心组件
+| | Search Platform | Agentic Matching |
+|---|---|---|
+| **Discovery** | Keyword → ranked list | Agent broadcasts demand → matching agents respond |
+| **Information depth** | Static listing (photos, rating) | Multi-turn Q&A, structured extraction, real-time availability |
+| **Negotiation** | Manual (chat/call) | Agent-to-agent automated negotiation |
+| **Verification** | User reviews (vulnerable to fraud) | Programmatic credential verification (health cert, ID, license) |
+| **Privacy** | Full exposure to platform | Differential privacy, selective information disclosure |
+| **Coverage** | High-volume homogeneous goods only | Any demand with an online counterparty, including niche and private needs |
 
-#### 2.2.1 User Agents（用户代理）
-- Web 聊天窗口
-- 微信公众号
-- Telegram Bot
-- 功能：
-  - 发起新请求
-  - 查看任务列表
-  - 查看任务进展
-  - 与智能体直接对话
+The ambition is not "another dating app" or "another rental platform." It is a universal matching substrate capable of replacing 美团-level search with agent-driven matching for **any** supply-demand pair.
 
-#### 2.2.2 Backbone（多智能体系统）
-- 基于大模型的对话系统
-- 需求处理智能体
-- 匹配协商机制
-- 用户信息管理
-- 隐私保护
-  - 对话中涉及的隐私信息，例如房产地址、身份证号等，在向匹配方问答时，利用差分隐私等技术进行处理；
-  - 每个用户有个默认隐私配置，用户可以在配置中选择以何种力度分享自己的隐私信息；
+### 1.3 Privacy-Sensitive Matching as a First-Class Requirement
 
-#### 2.2.3 Task Workflows（任务工作流）
-- 相亲工作流
-- 租房工作流
-- 游戏组队工作流
-- 可扩展的工作流框架
+Consider these scenarios that traditional platforms cannot serve well:
 
-#### 2.2.4 Tools（工具组件）
-- 人脸识别
-- 身份验证
-- 房产验证
-- 可扩展工具列表
+| Scenario | Privacy Challenge | Agentic Solution |
+|---|---|---|
+| **Intimate encounters** (one-night stand) | Neither party wants a public profile or platform-visible history | Encrypted demand broadcast; health verification without exposing raw medical data; reputation via cryptographically signed attestations |
+| **Sensitive medical treatment** | Patients don't want conditions linked to identity | Agent represents patient anonymously; verifies doctor credentials; negotiates confidentiality terms before identity disclosure |
+| **Disability care** | Families need trust but have limited network reach | Agent matches caregiver qualifications against care needs; verifies certifications; manages scheduling automatically |
+| **Legal/financial advice** | Client-attorney privilege requires confidentiality | Agent establishes secure channel; verifies bar license; destroys conversation records per client instruction |
 
-## 3. 数据模型
+The core insight: when both parties can be represented by agents, **privacy boundaries can be negotiated and enforced programmatically** rather than left to platform policy.
 
-### 3.1 User（用户）
-```python
-class User:
-    id: str
-    username: str
-    email: Optional[str]
-    created_at: datetime
-    preferences: Dict
-    private_info: Dict
-```
+---
 
-### 3.2 Agent（智能体）
-```python
-class Agent:
-    id: str
-    user_id: str
-    role: str  # "user_agent", "task_agent", "matching_agent"
-    created_at: datetime
-    active: bool
-```
+## 2. Reputation & Verification: Trust Without Central Authority
 
-### 3.3 Task（任务）
-```python
-class Task:
-    id: str
-    user_id: str
-    agent_id: str
-    task_type: str  # "dating", "rental", "gaming"
-    description: str
-    requirements: Dict
-    status: TaskStatus
-    created_at: datetime
-    matched_task_ids: List[str]
-    messages: List[Message]
-```
+### 2.1 The Reputation Problem
 
-### 3.4 Message（消息）
-```python
-class Message:
-    id: str
-    sender_id: str
-    receiver_id: Optional[str]
-    content: str
-    timestamp: datetime
-    is_public: bool
-```
+Traditional platforms rely on user reviews and star ratings. These are fragile:
+- **Fraud**: Fake reviews, review bombing, paid endorsements
+- **Low signal**: "Great service!" carries no verifiable weight
+- **Privacy violation**: Leaving a review for a sensitive service exposes the reviewer
+- **Cold start**: New providers lack any reputation signal
 
-## 4. 前端界面设计
+### 2.2 Agent-Driven Verification
 
-### 4.1 布局结构
+The system treats reputation as a **composable, verifiable signal** rather than a single numerical score. Key design principles:
+
+1. **Credential attestation.** Providers submit verifiable credentials (medical license, health check certificate, ID, property deed) to their agent. The agent cryptographically attests to the validity without exposing raw documents to counterparties. Example: for a one-night encounter, both parties' agents mutually verify a recent STD test certificate signed by a recognized clinic, confirming the result is negative and within validity period—without revealing the individual's identity, clinic name, or test date.
+
+2. **Multi-dimensional trust.** Reputation is not one number. It decomposes into independently verifiable dimensions:
+   - Identity verification (government ID, face match)
+   - Credential verification (professional license, property ownership)
+   - Health/safety attestation (medical test results, vaccination records)
+   - Transaction history (completed matches, dispute rate, response time)
+   - Peer attestation (cryptographic endorsements from verified users)
+
+3. **Automated negotiation of trust requirements.** The agent negotiates what verification level is required for a given match. A casual gaming teammate needs no verification. A one-night encounter may require reciprocal health attestation. A rental agreement may require identity + income verification from the tenant and property deed + safety inspection from the landlord.
+
+4. **Privacy-preserving disclosure.** Credentials are verified by the agent but disclosed to counterparties only at the level both parties agree to. The system supports progressive disclosure: start anonymous → exchange verified attributes → reveal identity only when mutual trust is established.
+
+---
+
+## 3. System Architecture
+
+### 3.1 High-Level Architecture
 
 ```
-┌────────────────────────────────────────────────────────────┐
-│                        顶部导航栏                            │
-├──────────┬───────────────────────────┬─────────────────────┤
-│          │                           │                     │
-│  任务    │      聊天区域             │    信息面板         │
-│  列表    │                           │                     │
-│          │  - 消息历史               │  - 需求详情         │
-│          │  - 输入框                 │  - 匹配结果         │
-│          │                           │  - 协商记录         │
-└──────────┴───────────────────────────┴─────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│                          Presentation Layer                       │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐           │
+│  │  Web (Vue 3) │  │   WeChat MP  │  │  Telegram    │  (future) │
+│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘           │
+└─────────┼─────────────────┼─────────────────┼────────────────────┘
+          │                 │                 │
+          └─────────────────┼─────────────────┘
+                            │  REST API  ( /api/* )
+                            ▼
+┌──────────────────────────────────────────────────────────────────┐
+│                       Application Layer (FastAPI)                 │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐   │
+│  │  Auth (JWT)  │  │  Task CRUD   │  │  Message / Chat      │   │
+│  │  + SSO       │  │  + Matching  │  │  + Demand Progress   │   │
+│  └──────────────┘  └──────────────┘  └──────────────────────┘   │
+└────────────────────────────┬─────────────────────────────────────┘
+                             │
+           ┌─────────────────┼─────────────────┐
+           ▼                 ▼                 ▼
+┌──────────────────┐ ┌──────────────┐ ┌──────────────────┐
+│  Agent System    │ │  Storage     │ │  Tools (future)  │
+│  ┌────────────┐  │ │  Layer       │ │  ┌────────────┐  │
+│  │LLM Gateway │  │ │  ┌────────┐  │ │  │Face Verify │  │
+│  │(DeepSeek)  │  │ │  │SQLite  │  │ │  │Doc Scan    │  │
+│  ├────────────┤  │ │  │(default│  │ │  │Health Cert │  │
+│  │Demand Def  │  │ │  │or      │  │ │  │Geo Filter  │  │
+│  │Engine V2   │  │ │  │Postgre)│  │ │  │ASR/Voice   │  │
+│  ├────────────┤  │ │  └────────┘  │ │  └────────────┘  │
+│  │    ACP     │  │ │              │ │                  │
+│  │  Protocol  │  │ │  Pluggable   │ │  Extensible via  │
+│  │            │  │ │  via Factory │ │  tool registry   │
+│  └────────────┘  │ │              │ │                  │
+└──────────────────┘ └──────────────┘ └──────────────────┘
 ```
 
-### 4.2 界面流程
+### 3.2 Core Subsystems
 
-1. **登录/注册** → 独立的认证界面
-2. **任务列表** → 左侧边栏，显示所有任务
-3. **聊天界面** → 中央区域，对话式交互
-4. **详情面板** → 右侧，显示任务相关信息
+| Subsystem | Location | Responsibility |
+|-----------|----------|----------------|
+| **Agent System** | `backend/agent_system.py` | LLM gateway, conversation orchestration, matching dispatch |
+| **Demand Definition Engine** | `backend/demand_definition_v2.py` | Multi-turn structured demand extraction via template-driven ACP protocol |
+| **Demand Templates** | `backend/demand_templates.py` | Type-specific field schemas, enum options, validation rules |
+| **Matching Framework** | `backend/matching/` | Pluggable matcher factory (`base.py`, `simple.py`, `factory.py`) |
+| **Storage Layer** | `backend/storage.py`, `backend/storage_sqlite.py`, `backend/storage_interface.py` | Pluggable backends: InMemory, SQLite, PostgreSQL |
+| **Auth & SSO** | `backend/auth.py`, `backend/sso/` | Local auth (bcrypt) + WeChat/Alipay SSO factory |
+| **ACP Protocol** | `backend/demand_definition_v2.py` (parsing) | Structured agent↔system↔user message format |
 
-## 5. 工作流程示例
+### 3.3 Key Architectural Decisions
 
-### 5.1 相亲匹配流程
+1. **Factory pattern for pluggable components.** Storage backend, matching algorithm, and SSO providers are all selected via environment variables (`STORAGE_TYPE`, `MATCHER_TYPE`) with run-time factory dispatch. This enables testing with in-memory storage, development with SQLite, and production with PostgreSQL—all sharing the same `StorageBackend` interface.
 
-```
-用户A                    智能体A                    智能体B                    用户B
-  │                        │                          │                        │
-  │──"我想找对象"────────>│                          │                        │
-  │                        │──创建任务                │                        │
-  │                        │──询问细节                │                        │
-  │<─"请告诉我更多..."────│                          │                        │
-  │                        │                          │                        │
-  │──"28岁，喜欢旅行"────>│                          │                        │
-  │                        │──完善需求                │                        │
-  │                        │──寻找匹配                │                        │
-  │                        │─────────────────────────>│                        │
-  │                        │                          │──检查用户B需求         │
-  │                        │<─"找到匹配！"───────────│                        │
-  │<─"找到匹配！"─────────│                          │                        │
-  │                        │                          │                        │
-  │                        │──开始协商────────────────>│                        │
-  │                        │                          │──询问用户B             │
-  │                        │                          │<─"可以认识一下"────────│
-  │                        │<─"可以认识一下"─────────│                        │
-  │<─"可以认识一下"───────│                          │                        │
-  │                        │                          │                        │
-  │──"好的，约时间"──────>│                          │                        │
-  │                        │──协商时间地点────────────>│                        │
-  │                        │                          │──询问用户B             │
-  │                        │                          │<─"周六下午3点"─────────│
-  │                        │<─"周六下午3点"──────────│                        │
-  │<─"周六下午3点"────────│                          │                        │
-  │                        │                          │                        │
-  │──"确认！"────────────>│                          │                        │
-  │                        │──任务完成────────────────>│                        │
-  │                        │                          │──通知用户B             │
-  │                        │<─"完成！"────────────────│                        │
-  │<─"完成！"─────────────│                          │                        │
-```
+2. **ACP (AgentComm Protocol) as the internal message contract.** Every LLM interaction uses a structured XML/JSON protocol that separates user-facing responses from system-facing state updates, extracted fields, and pending actions. This makes parsing reliable and prevents LLM output from leaking directly to users.
 
-## 6. 技术栈
+3. **Two-step confirmation for demand completion.** Users must issue two explicit confirmations to finalize a demand (COLLECTING → CONFIRMING → COMPLETED), preventing accidental submission of incomplete requirements.
 
-### 6.1 后端
-- **FastAPI** - Web 框架
-- **Pydantic** - 数据验证
-- **OpenAI API** - 大模型支持
-- **Python-dotenv** - 环境变量管理
+4. **Ephemeral match scoring.** `Task.score` and `Task.match_reason` are computed on-demand by the `/matches` endpoint and are never persisted. This keeps the data model clean and avoids stale scores.
 
-### 6.2 前端
-- **原生 HTML/CSS/JS** - 无框架依赖，轻量快速
-- **响应式设计** - 支持多设备
+5. **Thread-safe SQLite with explicit lock discipline.** `@with_lock` decorator with 5s timeout wraps all write operations. `_get_messages_by_task_internal` avoids re-acquiring the lock when called from within a locked context.
 
-### 6.3 存储（未来）
-- **SQLite/PostgreSQL** - 关系型数据库
-- **Redis** - 缓存和会话管理
-- **对象存储** - 文件和媒体存储
+---
 
-## 7. 未来扩展计划
+## 4. Core Workflow
 
-### 7.1 短期
-- [ ] 添加数据库持久化
-- [ ] 实现 WebSocket 实时通信
-- [ ] 用户身份认证系统
-- [ ] 更完善的匹配算法
-
-### 7.2 中期
-- [ ] 微信公众号集成
-- [ ] Telegram Bot 集成
-- [ ] 更多任务类型
-- [ ] 工具组件系统
-
-### 7.3 长期
-- [ ] 多语言支持
-- [ ] 移动端应用
-- [ ] 数据分析和推荐
-- [ ] 企业级部署方案
-
-## 8. 目录结构
+### 4.1 End-to-End Flow
 
 ```
-agentic_matching/
-├── backend/
-│   ├── __init__.py
-│   ├── models.py          # 数据模型
-│   ├── storage.py         # 存储层
-│   ├── agent_system.py    # 智能体系统
-│   └── main.py            # FastAPI 主应用
-├── static/
-│   └── index.html         # Web 前端
-├── DESIGN.md              # 设计文档（本文件）
-├── README.md              # 使用说明
-├── requirements.txt       # Python 依赖
-├── start.sh               # Shell 启动脚本
-└── start.py               # Python 启动脚本
+User expresses need                    Agent finds match               Negotiation & Close
+(natural language)                     (broadcast + scoring)           (agent-to-agent)
+
+┌──────────┐   ┌──────────┐   ┌──────────┐   ┌──────────┐   ┌──────────┐
+│ "I want  │   │ Demand   │   │ Matching │   │ Agent A  │   │ "Saturday│
+│ to rent  │ → │ Engine   │ → │ Engine   │ → │ ↔        │ → │ 3pm at   │
+│ near UoM"│   │ extracts │   │ scores   │   │ Agent B  │   │ café X"  │
+│          │   │ 8 fields │   │ candidates│  │ negotiate│   │          │
+└──────────┘   └──────────┘   └──────────┘   └──────────┘   └──────────┘
+  Phase 1:        Phase 2:        Phase 3:       Phase 4:        Phase 5:
+  Intent          Demand          Matching       Negotiation     Resolution
+  Detection       Definition      & Scoring
 ```
+
+### 4.2 Task Lifecycle
+
+```
+PENDING → ACTIVE → MATCHING → MATCHED → COMPLETED
+   │                    │         │
+   └── CANCELLED ←──────┴─────────┘
+```
+
+Tasks persist until the user explicitly marks them COMPLETED. Agents can proactively notify users of progress (e.g., "Found 3 matching apartments").
+
+---
+
+## 5. Data Model
+
+| Entity | Key Fields | Notes |
+|--------|------------|-------|
+| **User** | `id`, `username`, `password_hash`, `auth_provider`, `third_party_id`, `preferences`, `private_info` | `private_info` holds verifiable credentials (future) |
+| **Agent** | `id`, `user_id`, `role` | Roles: `user_agent`, `task_agent`, `matching_agent` |
+| **Task** | `id`, `user_id`, `agent_id`, `task_type`, `description`, `requirements`, `status`, `metadata` | `requirements` is the structured demand dict; `metadata` holds session state |
+| **Message** | `id`, `task_id`, `sender_id`, `content`, `message_type`, `is_public` | `message_type`: `agent`, `system`, `user` |
+
+Task types (defined in `backend/config.py:TaskType`):
+- `dating` — 婚恋交友
+- `rental` — 房屋租赁 (roles: `tenant`, `landlord`)
+- `gaming` — 游戏组队
+
+---
+
+## 6. Technology Stack
+
+| Layer | Technology |
+|-------|------------|
+| **Backend** | Python 3.10+, FastAPI, Pydantic v2, `pydantic-settings` |
+| **Frontend** | Vue 3, Vite 5, TypeScript, Vant 4, Pinia, Vue Router |
+| **LLM** | DeepSeek (via OpenAI-compatible API), configurable base URL |
+| **Storage** | SQLite (dev), PostgreSQL (prod target), InMemory (test) |
+| **Auth** | bcrypt + JWT (local), WeChat OAuth, Alipay OAuth |
+| **ASR** | OpenAI-compatible Whisper endpoint (proxied through backend) |
+| **Dev tooling** | pytest + pytest-asyncio, `asyncio_mode=auto` |
+
+---
+
+## 7. Document References
+
+| Document | Contents |
+|----------|----------|
+| [ROADMAP.md](./ROADMAP.md) | Implementation status, milestones, priorities |
+| [DEVELOPMENT_LOG.md](./DEVELOPMENT_LOG.md) | Iteration history, bugs fixed, lessons learned |
+| [demand_definition_design_v1.0.md](./demand_definition_design_v1.0.md) | Demand definition module: template system, state machine, extraction pipeline |
+| [agent_comm_protocol_v1.0.md](./agent_comm_protocol_v1.0.md) | ACP: structured protocol for agent↔system↔user message exchange |
+| [persistence_design.md](./persistence_design.md) | Pluggable storage backend architecture |
+| [long_short_memory_design_v1.0.md](./long_short_memory_design_v1.0.md) | Short-term context + long-term user profile memory system |
+| [frontend_refactor.md](./frontend_refactor.md) | Vue 3 migration architecture |
+| [voice_input_design_v1.0.md](./voice_input_design_v1.0.md) | Browser ASR → backend proxy pipeline |
