@@ -9,14 +9,15 @@
 | **Storage layer** | ✅ Done | InMemory (test), SQLite (dev), PostgreSQL interface defined |
 | **Agent system** | ✅ Done | LLM gateway, fallback for missing API key, ACP protocol integration |
 | **Demand definition** | ✅ Done | Template-driven, 5-scenario tested, two-step confirmation |
-| **Matching algorithm** | ⚠️ Basic | `SimpleMatcher` (keyword + requirements overlap). Needs semantic/LLM-based matching |
+| **Matching algorithm** | ⚠️ Basic | `SimpleMatcher` (keyword + requirements overlap). Needs LLM-based A2A negotiation |
 | **Auth** | ✅ Done | Local (bcrypt + JWT), WeChat SSO, Alipay SSO |
 | **ASR / Voice input** | ✅ Done | Browser recording → backend proxy → Whisper-compatible endpoint |
 | **Frontend** | ✅ Done | Vue 3 + Vite + Vant 4 + Pinia, login, chat, task list, info panel |
+| **Privacy layer** | ✅ Done | `backend/privacy/`: coarsening, 4-stage filter, disclosure budget, negotiation obfuscation, audit log (83 tests) |
+| **Privacy filter integration** | ⚠️ Pending | `PrivacyFilterLayer` not yet wired into `agent_system.py` live path |
+| **Multi-agent negotiation** | ❌ Not started | Agent-to-agent dialogue pipeline designed but not implemented |
 | **Reputation system** | ❌ Not started | Agent-driven verification design written, implementation pending |
-| **Privacy negotiation** | ❌ Not started | Differential privacy design exists, not implemented |
-| **Multi-agent negotiation** | ❌ Not started | Current matching is 1:1 comparison; agent-to-agent dialogue not yet built |
-| **Tests** | ⚠️ Partial | Auth, tasks, matching iteration, demand integration (5 scenarios). Coverage < 80% |
+| **Memory system** | ❌ Not started | Long/short-term memory design written, not implemented |
 
 ---
 
@@ -24,13 +25,13 @@
 
 | Priority | Task | Effort | Why |
 |----------|------|--------|-----|
-| P0 | Semantic/LLM-based matching | 5d | Keyword matching is insufficient for real-world diversity |
+| P0 | Wire PrivacyFilterLayer into agent message path | 3d | Privacy module is implemented but not connected to live path |
+| P0 | A2A negotiation (agent-to-agent chat pipeline) | 5d | Core differentiator; per `chat_based_agentic_matching_v1.0.md` design |
 | P0 | PostgreSQL production deployment | 3d | SQLite cannot scale to concurrent production loads |
-| P0 | Test coverage > 80% | 3d | Prevent regression as feature velocity increases |
-| P1 | Multi-agent negotiation (agent-to-agent dialogue) | 5d | Core differentiator; currently only 1:1 comparison |
 | P1 | Rate limiting & resource quotas | 3d | Prevent abuse, enable metered usage for free/paid tiers |
 | P1 | WebSocket real-time updates | 3d | Users need push notifications for match progress |
-| P2 | Expand task type registry | 4d | Add `medical`, `legal`, `caregiving`, `intimate` types |
+| P1 | Disclosure config REST API | 2d | Expose `DisclosureConfig` controls for user self-service |
+| P2 | Expand task type registry | 4d | Add carpool, property trading, second-hand goods per DASHBOARD M6 |
 | P2 | CI/CD pipeline | 2d | Automated test + deploy for faster iteration |
 
 ---

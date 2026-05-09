@@ -5,8 +5,11 @@
 | Document | Scope | Status |
 |----------|-------|--------|
 | [DESIGN.md](./DESIGN.md) | Vision, architecture, core design intents | **Primary reference** |
-| [ROADMAP.md](./ROADMAP.md) | Current status, milestones, near/mid/long-term plans | Active |
+| [DASHBOARD.md](./DASHBOARD.md) | Consolidated dashboard: architecture, module index, status, milestones | Active |
+| [ROADMAP.md](./ROADMAP.md) | Implementation status with 3-phase plan and risk register | Active |
 | [DEVELOPMENT_LOG.md](./DEVELOPMENT_LOG.md) | Implementation history, key bugs & lessons | Passive |
+| [chat_based_agentic_matching_v1.0.md](./chat_based_agentic_matching_v1.0.md) | Agent-to-agent matching pipeline (5-step: discovery → negotiation → shortlist) | Reference |
+| [privacy_preserving_agentic_matching_v1.0.md](./privacy_preserving_agentic_matching_v1.0.md) | Privacy layer: coarsening, 4-stage filter, disclosure budget, negotiation obfuscation | Reference |
 | [demand_definition_design_v1.0.md](./demand_definition_design_v1.0.md) | Demand definition module (template-driven multi-round dialogue) | Reference |
 | [agent_comm_protocol_v1.0.md](./agent_comm_protocol_v1.0.md) | ACP — structured agent/user/system message protocol | Reference |
 | [persistence_design.md](./persistence_design.md) | Pluggable storage backend design (interface + SQLite + PostgreSQL) | Reference |

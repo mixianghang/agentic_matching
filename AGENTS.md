@@ -17,6 +17,7 @@ python3 cleanup_tasks.py    # Delete all tasks (--keep-messages to preserve mess
 - **Backend**: Python FastAPI, entrypoint `backend/main.py:app`. Uses `pydantic-settings` with `.env`.
 - **Frontend**: Vue 3 + Vite + TypeScript + Vant 4 + Pinia. Dev server proxies `/api` → `localhost:8000`.
 - **Storage**: Pluggable via `StorageBackend` interface. Three backends: `in_memory`, `sqlite` (default in `.env.example`; uses `threading.Lock` with `@with_lock`), `postgresql`. Set with `STORAGE_TYPE` env var.
+- **Privacy**: Implemented in `backend/privacy/` (coarsening, 4-stage filter, disclosure budget, negotiation obfuscation, audit). Design in `design/privacy_preserving_agentic_matching_v1.0.md`. Not yet wired into live agent message path.
 - **Matching**: Factory pattern in `backend/matching/factory.py`. Selectable via `MATCHER_TYPE` env var (default `simple`).
 - **SSO**: Factory pattern in `backend/sso/factory.py`. WeChat + Alipay providers.
 - **Task types**: `dating`, `rental`, `gaming` (constants in `backend/config.py:TaskType`).
@@ -30,6 +31,7 @@ python3 cleanup_tasks.py    # Delete all tasks (--keep-messages to preserve mess
 ## Design docs
 
 - `design/DESIGN.md` — vision, architecture, core design intents (Matching for Everything, reputation/verification)
+- `design/DASHBOARD.md` — consolidated dashboard with architecture, module index, implementation status, milestones
 - `design/ROADMAP.md` — implementation status, priorities, milestones
 - `design/DEVELOPMENT_LOG.md` — bug history, root causes, lessons learned
 - `design/README.md` — full document index with reading guide

@@ -203,8 +203,11 @@ Task types (defined in `backend/config.py:TaskType`):
 
 | Document | Contents |
 |----------|----------|
+| [DASHBOARD.md](./DASHBOARD.md) | Consolidated dashboard: architecture, module index, implementation status, milestones |
 | [ROADMAP.md](./ROADMAP.md) | Implementation status, milestones, priorities |
 | [DEVELOPMENT_LOG.md](./DEVELOPMENT_LOG.md) | Iteration history, bugs fixed, lessons learned |
+| [chat_based_agentic_matching_v1.0.md](./chat_based_agentic_matching_v1.0.md) | Agent-to-agent matching pipeline: 5-step negotiation, shortlist generation |
+| [privacy_preserving_agentic_matching_v1.0.md](./privacy_preserving_agentic_matching_v1.0.md) | Privacy layer: coarsening taxonomy, 4-stage filter, disclosure budget, audit |
 | [demand_definition_design_v1.0.md](./demand_definition_design_v1.0.md) | Demand definition module: template system, state machine, extraction pipeline |
 | [agent_comm_protocol_v1.0.md](./agent_comm_protocol_v1.0.md) | ACP: structured protocol for agent↔system↔user message exchange |
 | [persistence_design.md](./persistence_design.md) | Pluggable storage backend architecture |

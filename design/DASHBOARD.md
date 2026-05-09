@@ -87,9 +87,8 @@ Agentic Matching replaces form-based marketplaces (dating, rental, gaming, etc.)
 
 | Document | What it covers |
 |----------|---------------|
-| [DESIGN.md](DESIGN.md) | Overall system architecture, data models (User/Agent/Task/Message), frontend layout, tech stack, and workflow sequence diagrams |
-| [ROADMAP.md](ROADMAP.md) | Milestone table, priority matrix, success metrics, risk assessment, and phased tech-stack evolution |
-| [design_overview.md](design_overview.md) | High-level design overview and system summary |
+| [DESIGN.md](DESIGN.md) | Master design doc: vision (Matching for Everything), privacy-sensitive matching, reputation/verification, architecture, data models |
+| [ROADMAP.md](ROADMAP.md) | Implementation status with 3-phase plan (production readiness → trust & verification → platform scale) and risk register |
 
 ### Agent & Conversation
 
@@ -128,7 +127,7 @@ Agentic Matching replaces form-based marketplaces (dating, rental, gaming, etc.)
 
 | Document | What it covers |
 |----------|---------------|
-| [todos_and_development_log.md](todos_and_development_log.md) | Chronological implementation log with bug analysis and lessons learned: demand definition (3 rounds), matching logic (5 rounds), privacy module (83 tests). Also contains backlog TODOs |
+| [DEVELOPMENT_LOG.md](DEVELOPMENT_LOG.md) | Chronological implementation log with bug analysis and lessons learned: demand definition (3 rounds), matching logic (5 rounds), privacy module (83 tests) |
 
 ---
 
