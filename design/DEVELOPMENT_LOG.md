@@ -1,5 +1,78 @@
 # Development Log
 
+## Demand Extraction V3 → DemandEngine (2026-05-10)
+
+### Round 2 — Documentation & Code Comments Sync
+
+**Scope**: Added module-level and class-level comments to all demand-related modules, referencing the V2.0 design doc. Updated ROADMAP.md (V2.0 marked Done, V1.0 marked replaced, migration tasks removed from Phase 1/3). Updated DASHBOARD.md (consolidated redundant status rows, Milestone 6 marked Complete with deliverables summary).
+
+**Files with added comments**: `backend/demand_engine.py` (module docstring + DemandEngine class docstring), `backend/demand_models.py` (module docstring + FieldType/DemandSchema/MatchingDimension/StructuredDemand class docstrings), `backend/schema_registry.py` (module docstring), `backend/content_safety.py` (module docstring), `backend/matching/comparators.py` (module docstring), `backend/matching/generic_engine.py` (module docstring), `backend/matching/__init__.py` (module docstring).
+
+**Design docs synced**: `design/ROADMAP.md`, `design/DASHBOARD.md`
+
+### Round 1 — Full Migration & V1/V2 Cleanup
+
+**Scope**: Rename `DemandExtractionEngineV3` → `DemandEngine` in `backend/demand_engine.py`. Delete `backend/demand_definition_v2.py`, `backend/demand_templates.py`. Move `FieldType` enum into `demand_models.py`. Remove `DEMAND_ENGINE_VERSION` toggle; `AgentSystem` uses `DemandEngine` exclusively. Remove `/api/demand_templates` endpoint; add `/api/schemas` using `SchemaRegistry`.
+
+**Files deleted**: `backend/demand_definition_v2.py` (1549 lines), `backend/demand_templates.py` (453 lines), `tests/test_demand_definition_v2.py` (617 lines)
+
+**Files renamed**: `backend/demand_extraction_v3.py` → `backend/demand_engine.py`, `tests/test_demand_extraction_v3.py` → `tests/test_demand_engine.py`
+
+**Intent classification fix**: `_classify_intent()` now includes full conversation history (last 8 messages) in the prompt, enabling the LLM to derive demand type from accumulated context, not just the current message.
+
+**Result**: 171 tests pass, zero regressions. Codebase reduced by ~2600 lines of legacy code.
+
+### Round 0 — Initial Implementation (2026-05-10)
+
+**Scope**: `backend/demand_models.py`, `backend/demand_extraction_v3.py`, `backend/schema_registry.py`, `backend/content_safety.py`, `backend/matching/comparators.py`, `backend/matching/generic_engine.py`, `backend/agent_system.py`, `tests/test_demand_extraction_v3.py`
+
+**Design**: `design/demand_definition_design_v2.0.md` — schema-on-read, dynamic type discovery, dimension-based generic matching
+
+**Result**: 42 new tests (model roundtrips, schema CRUD, content safety, 6 comparators, generic matching engine, extraction engine), 203 total test suite passes, no regressions. V3 engine runs alongside V2 via `DEMAND_ENGINE_VERSION=v3` env toggle.
+
+### Architecture Decisions
+
+1. **Schema-on-read via Dynamic Schema Registry**: Instead of hardcoding `TaskType` constants and `TEMPLATE_REGISTRY`, demand types are stored as `DemandSchema` records in a `demand_schemas` SQLite table. New types are registered at runtime via `SchemaRegistry.register()` and auto-activated after 3 uses (`pending → active`). This eliminates the code-change requirement for adding new demand types.
+
+2. **Three-layer Extraction Pipeline**: Content safety blocklist → Intent classification (type + role) → Schema-aware field extraction. Safety runs before any LLM call; blocklisted messages (drugs, adult content, gambling, weapons, harassment, self-harm) are rejected immediately.
+
+3. **MatchingDimension as Matching Contract**: Instead of hardcoded `_score_rental()`, `_score_dating()`, `_score_gaming()`, matching is defined declaratively. Each `DemandSchema` contains `List[MatchingDimension]` with comparator type, weight, and field resolution paths. `GenericMatchingEngine` executes comparators without understanding business semantics. Supports 6 built-in comparators: exact, enum_compatible, range_overlap, numeric_compatibility, geo_proximity, semantic_similarity.
+
+4. **Backward Compatibility**: V3 engine coexists with V2. `agent_system.py` routes via `DEMAND_ENGINE_VERSION` env var (default `v2`). V3 StructuredDemands are tagged with `engine_version: "v3"` in task metadata; `find_matching_tasks()` dispatches V3 demands to `GenericMatchingEngine` and V2 demands to the legacy per-type scorers.
+
+### Known Issues
+
+- **Blocklist uses substring match, not regex**: Changed from `\b` word-boundary patterns to simple keyword matching because `\b` does not work with CJK characters.
+- **Dating schema lacks user's own gender field**: The dating schema only collects `gender_preference` (what the user wants), not the user's own gender. This means `_score_dating()` cannot perform mutual gender preference matching — the V3 GenericMatchingEngine correctly rejects two seekers with incompatible gender preferences.
+- **SchemaRegistry singleton pattern**: `__init__` returns early if `_initialized` is True, making it impossible to create multiple isolated registry instances for testing. Test fixtures work around this by directly manipulating `_schemas`.
+
+### LLM Call Count
+
+V3 does fewer LLM calls per demand cycle than V2:
+- V2: Type detection + Role detection + ACP extraction + Response generation = 4 calls/turn typical
+- V3: Intent detect (combined type+role) + Extraction + Response = 3 calls/turn typical; safety layer only runs on first message
+
+### Files Changed
+
+| File | Status | Description |
+|------|--------|-------------|
+| `backend/demand_models.py` | New | 8 dataclasses: DemandSchema, SchemaField, MatchingDimension, FieldValue, Constraint, SemanticRequirement, StructuredDemand, ExtractionState |
+| `backend/demand_extraction_v3.py` | New | 3-layer extraction engine with 8-state pipeline |
+| `backend/schema_registry.py` | New | Schema CRUD with SQLite persistence, singleton pattern, 3 default schemas |
+| `backend/content_safety.py` | New | Content safety filter with blocklist + LLM classifier |
+| `backend/matching/comparators.py` | New | 6 built-in comparators with dispatcher |
+| `backend/matching/generic_engine.py` | New | Generic matching engine driven by MatchingDimensions |
+| `backend/matching/__init__.py` | Modified | Re-exports old matching classes + new V3 classes |
+| `backend/agent_system.py` | Modified | Dual-engine support: V2 (default) / V3 (via `DEMAND_ENGINE_VERSION`); `get_demand_progress()` updated; `find_matching_tasks()` dispatches to `GenericMatchingEngine` for V3 demands |
+| `tests/test_demand_extraction_v3.py` | New | 42 tests across 5 test classes |
+| `design/demand_definition_design_v2.0.md` | New | V2.0 design doc (936 lines) |
+| `design/ROADMAP.md` | Modified | Added 4-phase V3 migration plan |
+| `design/DASHBOARD.md` | Modified | Added V2.0 design doc + updated status |
+| `design/README.md` | Modified | Added V2.0 to document index |
+| `AGENTS.md` | Modified | Added V2.0 design doc reference |
+
+---
+
 ## Demand Definition Module (3 Rounds)
 
 **Scope**: `backend/demand_definition_v2.py`, `backend/demand_templates.py`, `backend/storage_sqlite.py`

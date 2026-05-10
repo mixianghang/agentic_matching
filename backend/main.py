@@ -57,10 +57,6 @@ def log_config():
         logger.info(f"  - Database: {settings.POSTGRES_DB}")
         logger.info(f"  - Password: {'✓ Configured' if settings.POSTGRES_PASSWORD else '✗ Not configured'}")
 
-    # Demand Definition Configuration
-    logger.info("Demand Definition Configuration:")
-    logger.info(f"  - Prompt Mode: {settings.DEMAND_PROMPT_MODE}")
-
     # SSO Configuration
     logger.info("SSO Configuration:")
     logger.info(f"  - WeChat: {'✓ Configured' if os.getenv('WECHAT_APP_ID') else '✗ Not configured'}")
@@ -428,11 +424,11 @@ def get_demand_progress(task_id: str, current_user: User = Depends(get_current_u
     return progress
 
 
-@app.get("/api/demand_templates")
-def get_demand_templates():
-    """获取所有可用的需求模板"""
-    from backend.demand_templates import list_all_templates
-    return {"templates": list_all_templates()}
+@app.get("/api/schemas")
+def get_schemas():
+    from backend.schema_registry import schema_registry
+    reg = schema_registry()
+    return {"schemas": [s.to_dict() for s in reg.list_active()]}
 
 
 class ASRResponse(BaseModel):

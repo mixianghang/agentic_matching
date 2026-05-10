@@ -10,7 +10,8 @@
 | [DEVELOPMENT_LOG.md](./DEVELOPMENT_LOG.md) | Implementation history, key bugs & lessons | Passive |
 | [chat_based_agentic_matching_v1.0.md](./chat_based_agentic_matching_v1.0.md) | Agent-to-agent matching pipeline (5-step: discovery → negotiation → shortlist) | Reference |
 | [privacy_preserving_agentic_matching_v1.0.md](./privacy_preserving_agentic_matching_v1.0.md) | Privacy layer: coarsening, 4-stage filter, disclosure budget, negotiation obfuscation | Reference |
-| [demand_definition_design_v1.0.md](./demand_definition_design_v1.0.md) | Demand definition module (template-driven multi-round dialogue) | Reference |
+| [demand_definition_design_v1.0.md](./demand_definition_design_v1.0.md) | Demand definition module (template-driven multi-round dialogue) — V1.0, superseded by V2.0 | Reference |
+| [demand_definition_design_v2.0.md](./demand_definition_design_v2.0.md) | **Demand extraction V2.0 redesign** — schema-on-read, dynamic type discovery, dimension-based generic matching, content safety, 4-phase migration plan | **Active** |
 | [agent_comm_protocol_v1.0.md](./agent_comm_protocol_v1.0.md) | ACP — structured agent/user/system message protocol | Reference |
 | [persistence_design.md](./persistence_design.md) | Pluggable storage backend design (interface + SQLite + PostgreSQL) | Reference |
 | [long_short_memory_design_v1.0.md](./long_short_memory_design_v1.0.md) | Short-term / long-term memory architecture | Reference |

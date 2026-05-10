@@ -117,12 +117,9 @@ The system treats reputation as a **composable, verifiable signal** rather than 
 | Subsystem | Location | Responsibility |
 |-----------|----------|----------------|
 | **Agent System** | `backend/agent_system.py` | LLM gateway, conversation orchestration, matching dispatch |
-| **Demand Definition Engine** | `backend/demand_definition_v2.py` | Multi-turn structured demand extraction via template-driven ACP protocol |
-| **Demand Templates** | `backend/demand_templates.py` | Type-specific field schemas, enum options, validation rules |
-| **Matching Framework** | `backend/matching/` | Pluggable matcher factory (`base.py`, `simple.py`, `factory.py`) |
-| **Storage Layer** | `backend/storage.py`, `backend/storage_sqlite.py`, `backend/storage_interface.py` | Pluggable backends: InMemory, SQLite, PostgreSQL |
-| **Auth & SSO** | `backend/auth.py`, `backend/sso/` | Local auth (bcrypt) + WeChat/Alipay SSO factory |
-| **ACP Protocol** | `backend/demand_definition_v2.py` (parsing) | Structured agent↔system↔user message format |
+| **Demand Engine** | `backend/demand_engine.py` | Schema-on-read demand extraction via dynamic schema registry + ACP protocol |
+| **Demand Schemas** | `backend/schema_registry.py` | Dynamic demand type management; schema CRUD with auto-activation |
+| **Matching Engine** | `backend/matching/generic_engine.py` | Generic dimension-based matching engine; 6 built-in comparators
 
 ### 3.3 Key Architectural Decisions
 
@@ -208,7 +205,7 @@ Task types (defined in `backend/config.py:TaskType`):
 | [DEVELOPMENT_LOG.md](./DEVELOPMENT_LOG.md) | Iteration history, bugs fixed, lessons learned |
 | [chat_based_agentic_matching_v1.0.md](./chat_based_agentic_matching_v1.0.md) | Agent-to-agent matching pipeline: 5-step negotiation, shortlist generation |
 | [privacy_preserving_agentic_matching_v1.0.md](./privacy_preserving_agentic_matching_v1.0.md) | Privacy layer: coarsening taxonomy, 4-stage filter, disclosure budget, audit |
-| [demand_definition_design_v1.0.md](./demand_definition_design_v1.0.md) | Demand definition module: template system, state machine, extraction pipeline |
+| [demand_definition_design_v2.0.md](./demand_definition_design_v2.0.md) | Demand extraction V2.0: dynamic schema registry, dimension-based matching, content safety |
 | [agent_comm_protocol_v1.0.md](./agent_comm_protocol_v1.0.md) | ACP: structured protocol for agent↔system↔user message exchange |
 | [persistence_design.md](./persistence_design.md) | Pluggable storage backend architecture |
 | [long_short_memory_design_v1.0.md](./long_short_memory_design_v1.0.md) | Short-term context + long-term user profile memory system |

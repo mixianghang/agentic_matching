@@ -95,7 +95,8 @@ Agentic Matching replaces form-based marketplaces (dating, rental, gaming, etc.)
 | Document | What it covers |
 |----------|---------------|
 | [agent_comm_protocol_v1.0.md](agent_comm_protocol_v1.0.md) | **ACP v1.0** — structured XML/JSON message format that fuses multi-source inputs (user, system, memory) and separates outputs (to_user, to_system, extracted fields). Demand state machine: INITIAL → COLLECTING → CONFIRMING → COMPLETED |
-| [demand_definition_design_v1.0.md](demand_definition_design_v1.0.md) | 5-phase demand collection flow; template registry (rental/dating/gaming/carpool/property/etc.); progressive refinement; smart prefilling from history |
+| [demand_definition_design_v1.0.md](demand_definition_design_v1.0.md) | 5-phase demand collection flow (V1.0, superseded by V2.0) |
+| [demand_definition_design_v2.0.md](demand_definition_design_v2.0.md) | **Demand extraction V2.0** — schema-on-read, dynamic type discovery, dimension-based generic matching, content safety | **Active** |
 | [chat_based_agentic_matching_v1.0.md](chat_based_agentic_matching_v1.0.md) | End-to-end matching pipeline: demand registration → candidate discovery → agent pre-screening → **agent-to-agent negotiation chat** → shortlist generation |
 
 ### Memory
@@ -137,8 +138,8 @@ Agentic Matching replaces form-based marketplaces (dating, rental, gaming, etc.)
 |--------|--------|-------|
 | FastAPI backend + CRUD | ✅ Complete | Auth, tasks, messages, SSO, voice ASR |
 | SQLite storage | ✅ Complete | Task metadata persistence, pluggable backend |
-| Demand definition (ACP v1.0) | ✅ Complete | Rental, dating, gaming templates; full state machine |
-| Matching algorithm | ✅ Complete | Per-type scorers (rental/dating/gaming) with test coverage |
+| Demand Engine | ✅ Complete | Schema-on-read, dynamic SchemaRegistry, 3-layer extraction, content safety, GenericMatchingEngine |
+| Matching Engine | ✅ Complete | GenericMatchingEngine with 6 comparators; per-type scoring removed |
 | Privacy layer | ✅ Complete | Coarsening, 4-stage filter, disclosure budget, audit log (83 tests) |
 | Vue 3 frontend | ✅ Complete | TaskList, ChatArea, InfoPanel, MessageBubble, mobile responsive |
 | Voice input | ✅ Complete | MediaRecorder → ASR proxy |
@@ -151,7 +152,7 @@ Agentic Matching replaces form-based marketplaces (dating, rental, gaming, etc.)
 | **Disclosure config REST API** | ⚠️ Pending | DisclosureConfig exists in-code; no frontend controls |
 | **Resource rate limiting** | ⚠️ Pending | Identified as top-priority in backlog |
 | WeChat OA / Telegram Bot messaging | ⚠️ Pending | SSO done; pub-account messaging integration not done |
-| Additional task types | ⚠️ Pending | Carpool, property, second-hand templates defined; not wired |
+| Additional task types | ⚠️ Pending | Will be addressed by V2.0 dynamic schema registry rather than hardcoded template expansion |
 | PostgreSQL backend | ⚠️ Pending | Abstraction ready; production backend not configured |
 | Native mobile app | ❌ Not started | See Milestone 4 below |
 | Document auto-verification | ❌ Not started | See Milestone 5 below |
@@ -240,13 +241,26 @@ Ordered by dependency and impact. Each milestone builds on the previous one.
 
 ---
 
-### Milestone 6 — Additional Task Types & Offline Data Import
+### Milestone 6 — Demand Extraction V2.0 (Dynamic Schema Registry + Generic Matching) ✅ Complete
 
-**Why**: Rental/dating/gaming templates exist; unlocking carpool, property trading, and second-hand goods expands the addressable market significantly. Offline import (park matchmaking boards, paper ads) is a unique differentiator described in the original design.
+**Status**: All four phases completed ahead of schedule. V1.0 code removed, V3 renamed to DemandEngine, backward compatibility dropped.
+
+**Delivered**:
+- `backend/demand_engine.py` — 3-layer extraction engine (safety → intent → field extraction) with 8-state pipeline
+- `backend/schema_registry.py` — Dynamic schema CRUD with SQLite persistence, auto-activation after 3 uses
+- `backend/demand_models.py` — IR data structures (StructuredDemand, DemandSchema, MatchingDimension, etc.)
+- `backend/content_safety.py` — Blocklist + LLM classifier for 6 content categories
+- `backend/matching/comparators.py` — 6 built-in comparators (exact, enum_compatible, range_overlap, numeric_compatibility, geo_proximity, semantic_similarity)
+- `backend/matching/generic_engine.py` — Generic dimension-based matching engine
+- `tests/test_demand_engine.py` — 42 unit tests; full suite 171 pass
+- Legacy V1/V2 code removed: `demand_definition_v2.py`, `demand_templates.py`, `test_demand_definition_v2.py`
+
+### Milestone 7 — Additional Task Types & Offline Data Import
+
+**Why**: With V2.0's dynamic schema registry, adding new task types no longer requires code changes — just schema records. Offline import (park matchmaking boards, paper ads) is a unique differentiator described in the original design.
 
 **Deliverables**:
-- Add templates for: carpool (driver/rider roles), property buying/selling, second-hand goods
-- Implement type-specific matching scorers for each new type
+- Seed schema records for: carpool (driver/rider roles), property buying/selling, second-hand goods
 - Build an offline data import pipeline: structured CSV/image → OCR → demand template auto-fill → agent-managed task creation
 - Add bulk-import API endpoint (`POST /api/import`) with preview and confirmation flow
 

@@ -8,8 +8,9 @@
 | **Data models** | ✅ Done | User, Agent, Task, Message, Token (Pydantic v2) |
 | **Storage layer** | ✅ Done | InMemory (test), SQLite (dev), PostgreSQL interface defined |
 | **Agent system** | ✅ Done | LLM gateway, fallback for missing API key, ACP protocol integration |
-| **Demand definition** | ✅ Done | Template-driven, 5-scenario tested, two-step confirmation |
-| **Matching algorithm** | ⚠️ Basic | `SimpleMatcher` (keyword + requirements overlap). Needs LLM-based A2A negotiation |
+| **Demand definition (V1.0)** | ✅ Done (replaced) | Template-driven, 3 types, 5-scenario tested; superseded by V2.0 |
+| **Demand Engine (V2.0)** | ✅ Done | Schema-on-read, dynamic SchemaRegistry, 3-layer extraction, content safety, GenericMatchingEngine with 6 comparators (see design/demand_definition_design_v2.0.md) |
+| **Matching algorithm** | ✅ Done | GenericMatchingEngine with 6 built-in comparators; per-type scoring removed |
 | **Auth** | ✅ Done | Local (bcrypt + JWT), WeChat SSO, Alipay SSO |
 | **ASR / Voice input** | ✅ Done | Browser recording → backend proxy → Whisper-compatible endpoint |
 | **Frontend** | ✅ Done | Vue 3 + Vite + Vant 4 + Pinia, login, chat, task list, info panel |
@@ -31,7 +32,6 @@
 | P1 | Rate limiting & resource quotas | 3d | Prevent abuse, enable metered usage for free/paid tiers |
 | P1 | WebSocket real-time updates | 3d | Users need push notifications for match progress |
 | P1 | Disclosure config REST API | 2d | Expose `DisclosureConfig` controls for user self-service |
-| P2 | Expand task type registry | 4d | Add carpool, property trading, second-hand goods per DASHBOARD M6 |
 | P2 | CI/CD pipeline | 2d | Automated test + deploy for faster iteration |
 
 ---

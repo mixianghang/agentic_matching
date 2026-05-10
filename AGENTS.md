@@ -18,7 +18,9 @@ python3 cleanup_tasks.py    # Delete all tasks (--keep-messages to preserve mess
 - **Frontend**: Vue 3 + Vite + TypeScript + Vant 4 + Pinia. Dev server proxies `/api` → `localhost:8000`.
 - **Storage**: Pluggable via `StorageBackend` interface. Three backends: `in_memory`, `sqlite` (default in `.env.example`; uses `threading.Lock` with `@with_lock`), `postgresql`. Set with `STORAGE_TYPE` env var.
 - **Privacy**: Implemented in `backend/privacy/` (coarsening, 4-stage filter, disclosure budget, negotiation obfuscation, audit). Design in `design/privacy_preserving_agentic_matching_v1.0.md`. Not yet wired into live agent message path.
-- **Matching**: Factory pattern in `backend/matching/factory.py`. Selectable via `MATCHER_TYPE` env var (default `simple`).
+- **Demand Engine**: `backend/demand_engine.py` — schema-on-read extraction with dynamic SchemaRegistry, content safety, 3-layer pipeline
+- **Schema Registry**: `backend/schema_registry.py` — dynamic demand type management with SQLite persistence, auto-activation after 3 uses
+- **Matching**: `backend/matching/generic_engine.py` — GenericMatchingEngine with 6 built-in comparators (exact, enum_compatible, range_overlap, numeric_compatibility, geo_proximity, semantic_similarity). Design in `design/demand_definition_design_v2.0.md`.
 - **SSO**: Factory pattern in `backend/sso/factory.py`. WeChat + Alipay providers.
 - **Task types**: `dating`, `rental`, `gaming` (constants in `backend/config.py:TaskType`).
 
